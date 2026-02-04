@@ -1,16 +1,10 @@
 import 'package:flutter/material.dart';
-import '../../main.dart';
+import '../../backend/services/auth_service.dart';
 import '../auth/login_screen.dart';
+import '../../main.dart';
 
-class ProfileScreen extends StatefulWidget {
+class ProfileScreen extends StatelessWidget {
   const ProfileScreen({super.key});
-
-  @override
-  State<ProfileScreen> createState() => _ProfileScreenState();
-}
-
-class _ProfileScreenState extends State<ProfileScreen> {
-  bool isDark = themeNotifier.value == ThemeMode.dark;
 
   @override
   Widget build(BuildContext context) {
@@ -61,37 +55,36 @@ class _ProfileScreenState extends State<ProfileScreen> {
             ),
             const SizedBox(height: 24),
             _settingTile(
+              context: context,
               icon: Icons.dark_mode,
               title: 'Dark Mode',
               trailing: Switch(
-                value: isDark,
+                value: themeNotifier.value == ThemeMode.dark,
                 onChanged: (value) {
-                  setState(() {
-                    isDark = value;
-                    themeNotifier.value =
-                    value ? ThemeMode.dark : ThemeMode.light;
-                  });
+                  themeNotifier.value =
+                  value ? ThemeMode.dark : ThemeMode.light;
                 },
               ),
             ),
-            _settingTile(
-              icon: Icons.language,
-              title: 'Language',
-              trailing: const Text('English'),
-            ),
             const Spacer(),
-            Container(
+            SizedBox(
               width: double.infinity,
               height: 52,
-              decoration: BoxDecoration(
-                color: Colors.redAccent,
-                borderRadius: BorderRadius.circular(26),
-              ),
-              child: TextButton(
-                onPressed: () {
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.redAccent,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(26),
+                  ),
+                ),
+                onPressed: () async {
+                  await AuthService.logout();
+                  if (!context.mounted) return;
                   Navigator.pushAndRemoveUntil(
                     context,
-                    MaterialPageRoute(builder: (_) => const LoginScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const LoginScreen(),
+                    ),
                         (route) => false,
                   );
                 },
@@ -112,6 +105,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _settingTile({
+    required BuildContext context,
     required IconData icon,
     required String title,
     required Widget trailing,
