@@ -1,6 +1,6 @@
 # meditrack
 
-A new Flutter project.
+Healthcare App using Flutter And Firebase project.
 
 ## Getting Started
 
