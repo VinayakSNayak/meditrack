@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../backend/services/firestore_service.dart';
 import 'add_family_screen.dart';
 
 class FamilyListScreen extends StatelessWidget {
@@ -27,13 +28,31 @@ class FamilyListScreen extends StatelessWidget {
         },
         child: const Icon(Icons.add),
       ),
-      body: ListView(
-        padding: const EdgeInsets.all(20),
-        children: [
-          _familyCard(name: 'Father', age: '55'),
-          _familyCard(name: 'Mother', age: '50'),
-          _familyCard(name: 'Grandfather', age: '75'),
-        ],
+      body: StreamBuilder(
+        stream: FirestoreService.getFamilyMembers(),
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+
+          if (!snapshot.hasData || snapshot.data!.docs.isEmpty) {
+            return const Center(child: Text("No family members added"));
+          }
+
+          final docs = snapshot.data!.docs;
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(20),
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              final data = docs[index].data() as Map<String, dynamic>;
+              return _familyCard(
+                name: data['name'] ?? '',
+                age: data['age']?.toString() ?? '',
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -45,13 +64,6 @@ class FamilyListScreen extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(26),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 14,
-            offset: Offset(0, 6),
-          ),
-        ],
       ),
       child: Row(
         children: [
@@ -83,7 +95,6 @@ class FamilyListScreen extends StatelessWidget {
               ],
             ),
           ),
-          const Icon(Icons.chevron_right, color: Colors.grey),
         ],
       ),
     );

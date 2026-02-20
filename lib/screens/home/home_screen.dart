@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../../widgets/member_selector.dart';
 import '../prescription/prescription_list_screen.dart';
+import '../prescription/add_prescription_screen.dart';
 import '../dashboard/health_dashboard_screen.dart';
 import '../chatbot/chatbot_screen.dart';
 import '../profile/profile_screen.dart';
+import '../../backend/services/firestore_service.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -18,6 +22,11 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF1F4FA),
+      appBar: AppBar(
+        backgroundColor: Colors.white,
+        elevation: 0,
+        title: const MemberSelector(),
+      ),
       body: SafeArea(
         child: IndexedStack(
           index: currentIndex,
@@ -35,177 +44,312 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _homeContent() {
+    final today = DateTime.now();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 36),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text(
-                    'Hi Vinayak 👋',
-                    style: TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w700,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                  SizedBox(height: 6),
-                  Text(
-                    'Stay healthy today',
-                    style: TextStyle(
-                      color: Color(0xFF8E8E93),
-                      fontSize: 15,
-                    ),
-                  ),
-                ],
-              ),
-              const Spacer(),
-              Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  shape: BoxShape.circle,
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black12,
-                      blurRadius: 10,
-                      offset: Offset(0, 4),
-                    ),
-                  ],
+          // 👋 Greeting
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
+            stream: FirestoreService.getAccountOwner(),
+            builder: (context, snapshot) {
+              String name = "User";
+              if (snapshot.hasData && snapshot.data!.exists) {
+                final data = snapshot.data!.data();
+                name = data?['name'] ?? "User";
+              }
+              return Text(
+                'Hi $name 👋',
+                style: const TextStyle(
+                  fontSize: 28,
+                  fontWeight: FontWeight.w700,
                 ),
-                child: const CircleAvatar(
-                  radius: 20,
-                  backgroundColor: Colors.transparent,
-                  child: Icon(Icons.person),
-                ),
-              ),
-            ],
+              );
+            },
           ),
+          const SizedBox(height: 6),
+          const Text(
+            'Stay healthy today',
+            style: TextStyle(
+              color: Color(0xFF8E8E93),
+              fontSize: 15,
+            ),
+          ),
+
           const SizedBox(height: 26),
+
+          // ================= TODAY SUMMARY =================
+
           _card(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Row(
-                  children: const [
-                    Text(
-                      "Today's Medicines",
-                      style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w600,
-                        letterSpacing: -0.2,
-                      ),
-                    ),
-                    Spacer(),
-                    Icon(Icons.notifications_none),
-                  ],
+                const Text(
+                  "Today's Summary",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 18),
-                _medicineRow('Aspirin', '8:00 AM', true),
-                const SizedBox(height: 14),
-                _medicineRow('Metformin', '9:00 PM', false),
-              ],
-            ),
-          ),
-          const SizedBox(height: 18),
-          Container(
-            padding: const EdgeInsets.all(22),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [Color(0xFF67C587), Color(0xFF3CB371)],
-              ),
-              borderRadius: BorderRadius.circular(28),
-              boxShadow: [
-                BoxShadow(
-                  color: Color(0x553CB371),
-                  blurRadius: 18,
-                  offset: Offset(0, 8),
+
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirestoreService.getPrescriptions(),
+                  builder: (context, prescriptionSnap) {
+                    if (!prescriptionSnap.hasData) {
+                      return const CircularProgressIndicator();
+                    }
+
+                    final docs = prescriptionSnap.data!.docs;
+
+                    final todayList = docs.where((doc) {
+                      final data = doc.data();
+
+                      final start =
+                      (data['startDate'] as Timestamp?)?.toDate();
+                      final end =
+                      (data['endDate'] as Timestamp?)?.toDate();
+
+                      if (start != null &&
+                          today.isBefore(
+                              DateTime(start.year, start.month, start.day))) {
+                        return false;
+                      }
+
+                      if (end != null &&
+                          today.isAfter(
+                              DateTime(end.year, end.month, end.day))) {
+                        return false;
+                      }
+
+                      return true;
+                    }).toList();
+
+                    final total = todayList.length;
+
+                    return StreamBuilder<int>(
+                      stream: FirestoreService.getTodayTakenCountStream(),
+                      builder: (context, takenSnap) {
+                        final taken = takenSnap.data ?? 0;
+
+                        return StreamBuilder<int>(
+                          stream:
+                          FirestoreService.getTodayMissedCountStream(),
+                          builder: (context, missedSnap) {
+                            final missed = missedSnap.data ?? 0;
+
+                            return Row(
+                              mainAxisAlignment:
+                              MainAxisAlignment.spaceBetween,
+                              children: [
+                                _summaryItem(
+                                    "Total", total.toString(), Colors.blue),
+                                _summaryItem(
+                                    "Taken", taken.toString(), Colors.green),
+                                _summaryItem(
+                                    "Missed", missed.toString(), Colors.red),
+                              ],
+                            );
+                          },
+                        );
+                      },
+                    );
+                  },
                 ),
               ],
             ),
-            child: Row(
-              children: [
-                const Icon(Icons.check_circle, color: Colors.white, size: 30),
-                const SizedBox(width: 14),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: const [
-                    Text(
-                      'Medicines Taken Today',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    SizedBox(height: 4),
-                    Text(
-                      '2',
-                      style: TextStyle(color: Colors.white),
-                    ),
-                  ],
-                ),
-                const Spacer(),
-                Container(
-                  padding:
-                  const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                  ),
-                  child: const Text(
-                    '2 / 2',
-                    style: TextStyle(
-                      color: Color(0xFF3CB371),
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                ),
-              ],
-            ),
           ),
-          const SizedBox(height: 18),
-          Row(
-            children: [
-              Expanded(
-                child: _infoCard(
-                  title: 'Missed Doses',
-                  value: '1',
-                  icon: Icons.warning,
-                  colors: const [Color(0xFFFFBABA), Color(0xFFFFE3E3)],
-                ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: _infoCard(
-                  title: 'Active Family Member',
-                  value: 'Grandfather',
-                  icon: Icons.group,
-                  colors: const [Color(0xFFB7DCFF), Color(0xFFDFF1FF)],
-                ),
-              ),
-            ],
-          ),
+
           const SizedBox(height: 26),
+
+          // ================= TODAY MEDICINES =================
+
+          _card(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  "Today's Medicines",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 18),
+
+                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                  stream: FirestoreService.getPrescriptions(),
+                  builder: (context, snapshot) {
+                    if (!snapshot.hasData ||
+                        snapshot.data!.docs.isEmpty) {
+                      return const Text(
+                        'No medicines for today',
+                        style: TextStyle(color: Colors.grey),
+                      );
+                    }
+
+                    final docs = snapshot.data!.docs;
+
+                    final todayList = docs.where((doc) {
+                      final data = doc.data();
+
+                      final start =
+                      (data['startDate'] as Timestamp?)?.toDate();
+                      final end =
+                      (data['endDate'] as Timestamp?)?.toDate();
+
+                      if (start != null &&
+                          today.isBefore(
+                              DateTime(start.year, start.month, start.day))) {
+                        return false;
+                      }
+
+                      if (end != null &&
+                          today.isAfter(
+                              DateTime(end.year, end.month, end.day))) {
+                        return false;
+                      }
+
+                      return true;
+                    }).toList();
+
+                    if (todayList.isEmpty) {
+                      return const Text(
+                        'No medicines for today',
+                        style: TextStyle(color: Colors.grey),
+                      );
+                    }
+
+                    return Column(
+                      children: todayList.map((doc) {
+                        final data = doc.data();
+                        final name = data['medicineName'] ?? '';
+                        final timeStamp =
+                        data['time'] as Timestamp?;
+                        final time = timeStamp != null
+                            ? TimeOfDay.fromDateTime(
+                            timeStamp.toDate())
+                            .format(context)
+                            : '';
+
+                        return Padding(
+                          padding:
+                          const EdgeInsets.only(bottom: 12),
+                          child: _medicineRow(
+                              doc.id, name, time),
+                        );
+                      }).toList(),
+                    );
+                  },
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 26),
+
+          // ================= QUICK ACTIONS =================
+
           const Text(
             'Quick Actions',
             style: TextStyle(
               fontSize: 18,
               fontWeight: FontWeight.w600,
-              letterSpacing: -0.2,
             ),
           ),
           const SizedBox(height: 14),
+
           Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment:
+            MainAxisAlignment.spaceBetween,
             children: [
-              _actionTile(Icons.add, 'Add\nPrescription', Colors.blue),
-              _actionTile(Icons.camera_alt, 'Scan\nPrescription', Colors.green),
-              _actionTile(Icons.favorite, 'Add\nHealth Record', Colors.purple),
+              _actionTile(
+                Icons.add,
+                'Add\nPrescription',
+                Colors.blue,
+                    () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                        const AddPrescriptionScreen()),
+                  );
+                },
+              ),
+              _actionTile(
+                Icons.camera_alt,
+                'Scan\nPrescription',
+                Colors.purple,
+                    () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                        builder: (_) =>
+                        const AddPrescriptionScreen()),
+                  );
+                },
+              ),
+              _actionTile(
+                Icons.bar_chart,
+                'Dashboard',
+                Colors.green,
+                    () {
+                  setState(() {
+                    currentIndex = 2;
+                  });
+                },
+              ),
             ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _summaryItem(String label, String value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value,
+          style: TextStyle(
+              fontSize: 22,
+              fontWeight: FontWeight.bold,
+              color: color),
+        ),
+        const SizedBox(height: 4),
+        Text(label,
+            style: const TextStyle(color: Colors.grey)),
+      ],
+    );
+  }
+
+  Widget _medicineRow(
+      String id, String name, String time) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF5F7FC),
+        borderRadius: BorderRadius.circular(22),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.medication, size: 34),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment:
+              CrossAxisAlignment.start,
+              children: [
+                Text(name,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w600)),
+                Text(time,
+                    style: const TextStyle(
+                        color: Colors.grey)),
+              ],
+            ),
           ),
         ],
       ),
@@ -214,45 +358,47 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _bottomNav() {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 12),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 18,
-            offset: Offset(0, -6),
-          ),
-        ],
-      ),
+      padding:
+      const EdgeInsets.symmetric(vertical: 12),
+      decoration:
+      const BoxDecoration(color: Colors.white),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        mainAxisAlignment:
+        MainAxisAlignment.spaceAround,
         children: [
           _navItem(Icons.home, 'Home', 0),
-          _navItem(Icons.medication, 'Prescriptions', 1),
-          _navItem(Icons.bar_chart, 'Dashboard', 2),
+          _navItem(Icons.medication,
+              'Prescriptions', 1),
+          _navItem(Icons.bar_chart,
+              'Dashboard', 2),
           _navItem(Icons.chat, 'Chat', 3),
-          _navItem(Icons.settings, 'Settings', 4),
+          _navItem(Icons.settings,
+              'Settings', 4),
         ],
       ),
     );
   }
 
-  Widget _navItem(IconData icon, String label, int index) {
+  Widget _navItem(
+      IconData icon, String label, int index) {
     final active = currentIndex == index;
     return GestureDetector(
-      onTap: () => setState(() => currentIndex = index),
+      onTap: () =>
+          setState(() => currentIndex = index),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: active ? Colors.green : Colors.grey),
+          Icon(icon,
+              color:
+              active ? Colors.green : Colors.grey),
           const SizedBox(height: 4),
           Text(
             label,
             style: TextStyle(
               fontSize: 12,
-              color: active ? Colors.green : Colors.grey,
+              color: active
+                  ? Colors.green
+                  : Colors.grey,
             ),
           ),
         ],
@@ -266,113 +412,38 @@ class _HomeScreenState extends State<HomeScreen> {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 14,
-            offset: Offset(0, 6),
-          ),
-        ],
       ),
       child: child,
     );
   }
 
-  Widget _medicineRow(String name, String time, bool taken) {
-    return Container(
-      padding: const EdgeInsets.all(14),
-      decoration: BoxDecoration(
-        color: const Color(0xFFF5F7FC),
-        borderRadius: BorderRadius.circular(22),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.medication, size: 34),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(name,
-                    style: const TextStyle(fontWeight: FontWeight.w600)),
-                Text(time, style: const TextStyle(color: Colors.grey)),
-              ],
+  Widget _actionTile(IconData icon, String label,
+      Color color, VoidCallback onTap) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 100,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius:
+          BorderRadius.circular(28),
+        ),
+        child: Column(
+          children: [
+            CircleAvatar(
+              backgroundColor:
+              color.withValues(alpha: 0.18),
+              child:
+              Icon(icon, color: color),
             ),
-          ),
-          Container(
-            padding:
-            const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-            decoration: BoxDecoration(
-              color: taken ? Colors.green : Colors.orange,
-              borderRadius: BorderRadius.circular(22),
-            ),
-            child: Text(
-              taken ? 'Taken' : 'Pending',
-              style: const TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _infoCard({
-    required String title,
-    required String value,
-    required IconData icon,
-    required List<Color> colors,
-  }) {
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(colors: colors),
-        borderRadius: BorderRadius.circular(28),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon),
-          const SizedBox(height: 8),
-          Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-          const SizedBox(height: 4),
-          Text(
-            value,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _actionTile(IconData icon, String label, Color color) {
-    return Container(
-      width: 100,
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 10,
-            offset: Offset(0, 6),
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          CircleAvatar(
-            backgroundColor: color.withOpacity(0.18),
-            child: Icon(icon, color: color),
-          ),
-          const SizedBox(height: 10),
-          Text(label,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 12)),
-        ],
+            const SizedBox(height: 10),
+            Text(label,
+                textAlign: TextAlign.center,
+                style:
+                const TextStyle(fontSize: 12)),
+          ],
+        ),
       ),
     );
   }

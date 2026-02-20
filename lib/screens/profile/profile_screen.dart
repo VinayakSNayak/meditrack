@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../../backend/services/auth_service.dart';
+import '../../backend/services/firestore_service.dart';
 import '../auth/login_screen.dart';
+import 'edit_profile_screen.dart';
 import '../../main.dart';
 
 class ProfileScreen extends StatelessWidget {
@@ -8,52 +11,41 @@ class ProfileScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text(
-          'Profile',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
+        title: const Text("Profile"),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.edit),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const EditProfileScreen(),
+                ),
+              );
+            },
+          ),
+        ],
       ),
       body: Padding(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(28),
-              ),
-              child: Row(
-                children: [
-                  const CircleAvatar(
-                    radius: 32,
-                    child: Icon(Icons.person, size: 32),
-                  ),
-                  const SizedBox(width: 16),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text(
-                        'Vinayak',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      SizedBox(height: 4),
-                      Text(
-                        'vinayak@email.com',
-                        style: TextStyle(color: Colors.grey),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-            ),
+
+            /// 🔹 PROFILE CARD
+            _profileCard(user),
+
             const SizedBox(height: 24),
+
+            /// 🔹 FAMILY MEMBERS SECTION
+            _familySection(),
+
+            const SizedBox(height: 24),
+
+            /// 🔹 DARK MODE
             _settingTile(
               context: context,
               icon: Icons.dark_mode,
@@ -66,7 +58,10 @@ class ProfileScreen extends StatelessWidget {
                 },
               ),
             ),
+
             const Spacer(),
+
+            /// 🔹 LOGOUT
             SizedBox(
               width: double.infinity,
               height: 52,
@@ -90,11 +85,7 @@ class ProfileScreen extends StatelessWidget {
                 },
                 child: const Text(
                   'Logout',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
+                  style: TextStyle(color: Colors.white),
                 ),
               ),
             ),
@@ -103,6 +94,199 @@ class ProfileScreen extends StatelessWidget {
       ),
     );
   }
+
+  /// ================= PROFILE CARD =================
+
+  Widget _profileCard(User? user) {
+    return StreamBuilder(
+      stream: FirestoreService.getActiveMember(),
+      builder: (context, snapshot) {
+        String name = "User";
+        String age = "";
+        String relation = "";
+
+        if (snapshot.hasData && snapshot.data!.exists) {
+          final data =
+          snapshot.data!.data() as Map<String, dynamic>;
+          name = data['name'] ?? "User";
+          age = data['age']?.toString() ?? "";
+          relation = data['relation'] ?? "";
+        }
+
+        return Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Theme.of(context).cardColor,
+            borderRadius: BorderRadius.circular(28),
+          ),
+          child: Row(
+            children: [
+              const CircleAvatar(
+                radius: 32,
+                child: Icon(Icons.person),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(name,
+                        style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600)),
+                    Text(user?.email ?? '',
+                        style:
+                        const TextStyle(color: Colors.grey)),
+                    if (relation.isNotEmpty)
+                      Text("Relation: $relation",
+                          style: const TextStyle(
+                              color: Colors.grey)),
+                    if (age.isNotEmpty)
+                      Text("Age: $age",
+                          style: const TextStyle(
+                              color: Colors.grey)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  /// ================= FAMILY SECTION =================
+
+  Widget _familySection() {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(26),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 12,
+            offset: Offset(0, 6),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+
+          const Text(
+            "Family Members",
+            style: TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w600),
+          ),
+
+          const SizedBox(height: 16),
+
+          StreamBuilder(
+            stream: FirestoreService.getMembers(),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const CircularProgressIndicator();
+              }
+
+              final members = snapshot.data!.docs;
+
+              return Column(
+                children: [
+                  for (var member in members)
+                    ListTile(
+                      title: Text(member['name']),
+                      subtitle:
+                      Text(member['relation']),
+                      trailing: const Icon(Icons.arrow_forward_ios,
+                          size: 16),
+                      onTap: () async {
+                        await FirestoreService
+                            .setActiveMember(member.id);
+                        ScaffoldMessenger.of(context)
+                            .showSnackBar(
+                          SnackBar(
+                              content: Text(
+                                  "${member['name']} selected")),
+                        );
+                      },
+                    ),
+
+                  const SizedBox(height: 8),
+
+                  /// ➕ ADD MEMBER BUTTON
+                  ElevatedButton.icon(
+                    onPressed: () =>
+                        _showAddMemberDialog(context),
+                    icon: const Icon(Icons.add),
+                    label: const Text("Add Member"),
+                  ),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ================= ADD MEMBER DIALOG =================
+
+  void _showAddMemberDialog(BuildContext context) {
+    final nameController = TextEditingController();
+    final ageController = TextEditingController();
+    final relationController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text("Add Family Member"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: nameController,
+              decoration:
+              const InputDecoration(labelText: "Name"),
+            ),
+            TextField(
+              controller: ageController,
+              keyboardType: TextInputType.number,
+              decoration:
+              const InputDecoration(labelText: "Age"),
+            ),
+            TextField(
+              controller: relationController,
+              decoration:
+              const InputDecoration(labelText: "Relation"),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("Cancel"),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              await FirestoreService.addMember(
+                name: nameController.text,
+                age: int.tryParse(ageController.text) ?? 0,
+                relation: relationController.text,
+              );
+
+              Navigator.pop(context);
+            },
+            child: const Text("Save"),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// ================= SETTINGS TILE =================
 
   Widget _settingTile({
     required BuildContext context,
@@ -122,13 +306,10 @@ class ProfileScreen extends StatelessWidget {
           Icon(icon),
           const SizedBox(width: 16),
           Expanded(
-            child: Text(
-              title,
-              style: const TextStyle(
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-            ),
+            child: Text(title,
+                style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600)),
           ),
           trailing,
         ],
