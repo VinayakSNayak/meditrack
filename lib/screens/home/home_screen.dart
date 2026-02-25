@@ -3,9 +3,9 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../widgets/member_selector.dart';
 import '../prescription/prescription_list_screen.dart';
 import '../prescription/add_prescription_screen.dart';
-import '../dashboard/health_dashboard_screen.dart';
 import '../chatbot/chatbot_screen.dart';
 import '../profile/profile_screen.dart';
+import '../health/health_records_screen.dart';
 import '../../backend/services/firestore_service.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -33,7 +33,7 @@ class _HomeScreenState extends State<HomeScreen> {
           children: [
             _homeContent(),
             const PrescriptionListScreen(),
-            const HealthDashboardScreen(),
+            const HealthRecordsScreen(),
             const ChatbotScreen(),
             const ProfileScreen(),
           ],
@@ -51,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+
           // 👋 Greeting
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
             stream: FirestoreService.getAccountOwner(),
@@ -69,96 +70,14 @@ class _HomeScreenState extends State<HomeScreen> {
               );
             },
           ),
+
           const SizedBox(height: 6),
+
           const Text(
             'Stay healthy today',
             style: TextStyle(
               color: Color(0xFF8E8E93),
               fontSize: 15,
-            ),
-          ),
-
-          const SizedBox(height: 26),
-
-          // ================= TODAY SUMMARY =================
-
-          _card(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  "Today's Summary",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 18),
-
-                StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-                  stream: FirestoreService.getPrescriptions(),
-                  builder: (context, prescriptionSnap) {
-                    if (!prescriptionSnap.hasData) {
-                      return const CircularProgressIndicator();
-                    }
-
-                    final docs = prescriptionSnap.data!.docs;
-
-                    final todayList = docs.where((doc) {
-                      final data = doc.data();
-
-                      final start =
-                      (data['startDate'] as Timestamp?)?.toDate();
-                      final end =
-                      (data['endDate'] as Timestamp?)?.toDate();
-
-                      if (start != null &&
-                          today.isBefore(
-                              DateTime(start.year, start.month, start.day))) {
-                        return false;
-                      }
-
-                      if (end != null &&
-                          today.isAfter(
-                              DateTime(end.year, end.month, end.day))) {
-                        return false;
-                      }
-
-                      return true;
-                    }).toList();
-
-                    final total = todayList.length;
-
-                    return StreamBuilder<int>(
-                      stream: FirestoreService.getTodayTakenCountStream(),
-                      builder: (context, takenSnap) {
-                        final taken = takenSnap.data ?? 0;
-
-                        return StreamBuilder<int>(
-                          stream:
-                          FirestoreService.getTodayMissedCountStream(),
-                          builder: (context, missedSnap) {
-                            final missed = missedSnap.data ?? 0;
-
-                            return Row(
-                              mainAxisAlignment:
-                              MainAxisAlignment.spaceBetween,
-                              children: [
-                                _summaryItem(
-                                    "Total", total.toString(), Colors.blue),
-                                _summaryItem(
-                                    "Taken", taken.toString(), Colors.green),
-                                _summaryItem(
-                                    "Missed", missed.toString(), Colors.red),
-                              ],
-                            );
-                          },
-                        );
-                      },
-                    );
-                  },
-                ),
-              ],
             ),
           ),
 
@@ -226,8 +145,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: todayList.map((doc) {
                         final data = doc.data();
                         final name = data['medicineName'] ?? '';
-                        final timeStamp =
-                        data['time'] as Timestamp?;
+                        final timeStamp = data['time'] as Timestamp?;
                         final time = timeStamp != null
                             ? TimeOfDay.fromDateTime(
                             timeStamp.toDate())
@@ -237,8 +155,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         return Padding(
                           padding:
                           const EdgeInsets.only(bottom: 12),
-                          child: _medicineRow(
-                              doc.id, name, time),
+                          child: _medicineRow(name, time),
                         );
                       }).toList(),
                     );
@@ -259,6 +176,7 @@ class _HomeScreenState extends State<HomeScreen> {
               fontWeight: FontWeight.w600,
             ),
           ),
+
           const SizedBox(height: 14),
 
           Row(
@@ -278,6 +196,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 },
               ),
+
               _actionTile(
                 Icons.camera_alt,
                 'Scan\nPrescription',
@@ -291,9 +210,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   );
                 },
               ),
+
               _actionTile(
-                Icons.bar_chart,
-                'Dashboard',
+                Icons.favorite,
+                'Health\nRecords',
                 Colors.green,
                     () {
                   setState(() {
@@ -308,25 +228,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _summaryItem(String label, String value, Color color) {
-    return Column(
-      children: [
-        Text(
-          value,
-          style: TextStyle(
-              fontSize: 22,
-              fontWeight: FontWeight.bold,
-              color: color),
-        ),
-        const SizedBox(height: 4),
-        Text(label,
-            style: const TextStyle(color: Colors.grey)),
-      ],
-    );
-  }
-
-  Widget _medicineRow(
-      String id, String name, String time) {
+  Widget _medicineRow(String name, String time) {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
@@ -367,13 +269,10 @@ class _HomeScreenState extends State<HomeScreen> {
         MainAxisAlignment.spaceAround,
         children: [
           _navItem(Icons.home, 'Home', 0),
-          _navItem(Icons.medication,
-              'Prescriptions', 1),
-          _navItem(Icons.bar_chart,
-              'Dashboard', 2),
+          _navItem(Icons.medication, 'Prescriptions', 1),
+          _navItem(Icons.favorite, 'Health', 2),
           _navItem(Icons.chat, 'Chat', 3),
-          _navItem(Icons.settings,
-              'Settings', 4),
+          _navItem(Icons.settings, 'Settings', 4),
         ],
       ),
     );
@@ -382,6 +281,7 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _navItem(
       IconData icon, String label, int index) {
     final active = currentIndex == index;
+
     return GestureDetector(
       onTap: () =>
           setState(() => currentIndex = index),
@@ -434,8 +334,7 @@ class _HomeScreenState extends State<HomeScreen> {
             CircleAvatar(
               backgroundColor:
               color.withValues(alpha: 0.18),
-              child:
-              Icon(icon, color: color),
+              child: Icon(icon, color: color),
             ),
             const SizedBox(height: 10),
             Text(label,
