@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../backend/services/firestore_service.dart';
 import 'add_metric_screen.dart';
+import 'add_condition_screen.dart';
+import 'add_other_record_screen.dart';
 import 'body_vitals_view_screen.dart';
 import 'blood_records_view_screen.dart';
 import 'conditions_view_screen.dart';
@@ -31,13 +33,13 @@ class HealthRecordsScreen extends StatelessWidget {
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
-          _tile(context, "Body Vitals", BodyVitalsViewScreen()),
+          _tile(context, "Body Vitals", const BodyVitalsViewScreen()),
           const SizedBox(height: 16),
-          _tile(context, "Blood Records", BloodRecordsViewScreen()),
+          _tile(context, "Blood Records", const BloodRecordsViewScreen()),
           const SizedBox(height: 16),
-          _tile(context, "Existing Conditions", ConditionsViewScreen()),
+          _tile(context, "Existing Conditions", const ConditionsViewScreen()),
           const SizedBox(height: 16),
-          _tile(context, "Other Records", OtherRecordsViewScreen()),
+          _tile(context, "Other Records", const OtherRecordsViewScreen()),
         ],
       ),
     );
@@ -81,10 +83,12 @@ class HealthRecordsScreen extends StatelessWidget {
     await FirestoreService.getBloodMetrics().first;
 
     final existingBodyTypes = bodySnapshot.docs
+        .where((e) => e.data().containsKey('type'))
         .map((e) => e.data()['type'])
         .toSet();
 
     final existingBloodTypes = bloodSnapshot.docs
+        .where((e) => e.data().containsKey('type'))
         .map((e) => e.data()['type'])
         .toSet();
 
@@ -92,7 +96,7 @@ class HealthRecordsScreen extends StatelessWidget {
       context: context,
       shape: const RoundedRectangleBorder(
         borderRadius:
-        BorderRadius.vertical(top: Radius.circular(20)),
+        BorderRadius.vertical(top: Radius.circular(22)),
       ),
       builder: (_) {
         return Padding(
@@ -100,13 +104,16 @@ class HealthRecordsScreen extends StatelessWidget {
           child: ListView(
             shrinkWrap: true,
             children: [
+
+              /// BODY VITALS
               const Text(
-                "Add Health Metric",
+                "Body Vitals",
                 style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600),
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 12),
 
               ..._bodyMetrics
                   .where((m) => !existingBodyTypes.contains(m))
@@ -116,6 +123,18 @@ class HealthRecordsScreen extends StatelessWidget {
                 "body",
               )),
 
+              const SizedBox(height: 24),
+
+              /// BLOOD RECORDS
+              const Text(
+                "Blood Records",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+
               ..._bloodMetrics
                   .where((m) => !existingBloodTypes.contains(m))
                   .map((type) => _metricOption(
@@ -123,6 +142,61 @@ class HealthRecordsScreen extends StatelessWidget {
                 type,
                 "blood",
               )),
+
+              const SizedBox(height: 24),
+
+              /// EXISTING CONDITIONS
+              const Text(
+                "Existing Conditions",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              ListTile(
+                title: const Text("Add Condition"),
+                trailing:
+                const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const AddConditionScreen(),
+                    ),
+                  );
+                },
+              ),
+
+              const SizedBox(height: 24),
+
+              /// OTHER RECORDS
+              const Text(
+                "Other Records",
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+
+              ListTile(
+                title: const Text("Add Other Record"),
+                trailing:
+                const Icon(Icons.arrow_forward_ios, size: 16),
+                onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) =>
+                      const AddOtherRecordScreen(),
+                    ),
+                  );
+                },
+              ),
             ],
           ),
         );
