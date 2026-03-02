@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../backend/services/firestore_service.dart';
 import 'add_metric_screen.dart';
 import 'add_condition_screen.dart';
@@ -14,12 +13,14 @@ class HealthRecordsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6FA),
+      backgroundColor: bg,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: const Color(0xFFF4F6FA),
-        foregroundColor: Colors.black,
+        backgroundColor: bg,
+        foregroundColor: isDark ? Colors.white : Colors.black,
         title: const Text(
           "Health Records",
           style: TextStyle(fontWeight: FontWeight.w600),
@@ -47,40 +48,31 @@ class HealthRecordsScreen extends StatelessWidget {
 
   Widget _tile(BuildContext context, String title, Widget screen) {
     return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => screen),
-        );
-      },
+      onTap: () => Navigator.push(
+          context, MaterialPageRoute(builder: (_) => screen)),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: Theme.of(context).cardColor,
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.04),
+              color: Colors.black.withValues(alpha: 0.04),
               blurRadius: 12,
             )
           ],
         ),
         child: Text(
           title,
-          style: const TextStyle(
-            fontSize: 16,
-            fontWeight: FontWeight.w600,
-          ),
+          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
         ),
       ),
     );
   }
 
   void _showAddOptions(BuildContext context) async {
-    final bodySnapshot =
-    await FirestoreService.getBodyVitalMetrics().first;
-    final bloodSnapshot =
-    await FirestoreService.getBloodMetrics().first;
+    final bodySnapshot = await FirestoreService.getBodyVitalMetrics().first;
+    final bloodSnapshot = await FirestoreService.getBloodMetrics().first;
 
     final existingBodyTypes = bodySnapshot.docs
         .where((e) => e.data().containsKey('type'))
@@ -92,120 +84,67 @@ class HealthRecordsScreen extends StatelessWidget {
         .map((e) => e.data()['type'])
         .toSet();
 
+    if (!context.mounted) return;
+
     showModalBottomSheet(
       context: context,
       shape: const RoundedRectangleBorder(
-        borderRadius:
-        BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
       ),
-      builder: (_) {
-        return Padding(
-          padding: const EdgeInsets.all(20),
-          child: ListView(
-            shrinkWrap: true,
-            children: [
+      builder: (_) => Padding(
+        padding: const EdgeInsets.all(20),
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Text("Body Vitals",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            ..._bodyMetrics
+                .where((m) => !existingBodyTypes.contains(m))
+                .map((type) => _metricOption(context, type, 'bodyVitals')),
 
-              /// BODY VITALS
-              const Text(
-                "Body Vitals",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
+            const SizedBox(height: 24),
+            const Text("Blood Records",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            ..._bloodMetrics
+                .where((m) => !existingBloodTypes.contains(m))
+                .map((type) => _metricOption(context, type, 'bloodRecords')),
 
-              ..._bodyMetrics
-                  .where((m) => !existingBodyTypes.contains(m))
-                  .map((type) => _metricOption(
-                context,
-                type,
-                "body",
-              )),
+            const SizedBox(height: 24),
+            const Text("Existing Conditions",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            ListTile(
+              title: const Text("Add Condition"),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const AddConditionScreen()));
+              },
+            ),
 
-              const SizedBox(height: 24),
-
-              /// BLOOD RECORDS
-              const Text(
-                "Blood Records",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              ..._bloodMetrics
-                  .where((m) => !existingBloodTypes.contains(m))
-                  .map((type) => _metricOption(
-                context,
-                type,
-                "blood",
-              )),
-
-              const SizedBox(height: 24),
-
-              /// EXISTING CONDITIONS
-              const Text(
-                "Existing Conditions",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              ListTile(
-                title: const Text("Add Condition"),
-                trailing:
-                const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const AddConditionScreen(),
-                    ),
-                  );
-                },
-              ),
-
-              const SizedBox(height: 24),
-
-              /// OTHER RECORDS
-              const Text(
-                "Other Records",
-                style: TextStyle(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              ListTile(
-                title: const Text("Add Other Record"),
-                trailing:
-                const Icon(Icons.arrow_forward_ios, size: 16),
-                onTap: () {
-                  Navigator.pop(context);
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) =>
-                      const AddOtherRecordScreen(),
-                    ),
-                  );
-                },
-              ),
-            ],
-          ),
-        );
-      },
+            const SizedBox(height: 24),
+            const Text("Other Records",
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            const SizedBox(height: 12),
+            ListTile(
+              title: const Text("Add Other Record"),
+              trailing: const Icon(Icons.arrow_forward_ios, size: 16),
+              onTap: () {
+                Navigator.pop(context);
+                Navigator.push(context,
+                    MaterialPageRoute(builder: (_) => const AddOtherRecordScreen()));
+              },
+            ),
+          ],
+        ),
+      ),
     );
   }
 
-  Widget _metricOption(
-      BuildContext context, String type, String category) {
+  Widget _metricOption(BuildContext context, String type, String category) {
     return ListTile(
       title: Text(type),
       trailing: const Icon(Icons.arrow_forward_ios, size: 16),
@@ -214,10 +153,7 @@ class HealthRecordsScreen extends StatelessWidget {
         Navigator.push(
           context,
           MaterialPageRoute(
-            builder: (_) => AddMetricScreen(
-              metricType: type,
-              category: category,
-            ),
+            builder: (_) => AddMetricScreen(metricType: type, category: category),
           ),
         );
       },
@@ -225,21 +161,12 @@ class HealthRecordsScreen extends StatelessWidget {
   }
 
   static const List<String> _bodyMetrics = [
-    "Blood Pressure",
-    "Heart Rate",
-    "Temperature",
-    "Respiratory Rate",
-    "SpO2",
-    "Weight",
-    "Height",
+    "Blood Pressure", "Heart Rate", "Temperature",
+    "Respiratory Rate", "SpO₂", "Weight", "Height",
   ];
 
   static const List<String> _bloodMetrics = [
-    "Hemoglobin",
-    "RBC",
-    "WBC",
-    "Platelets",
-    "Cholesterol",
-    "Blood Sugar",
+    "Hemoglobin", "RBC", "WBC", "Platelets",
+    "FBS", "HbA1c", "Cholesterol", "LDL", "HDL", "Triglycerides",
   ];
 }

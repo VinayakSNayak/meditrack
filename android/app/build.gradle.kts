@@ -22,7 +22,7 @@ android {
 
     defaultConfig {
         applicationId = "com.meditrack.app.meditrack"
-        minSdk = flutter.minSdkVersion
+        minSdk = flutter.minSdkVersion // Required for flutter_secure_storage (Android Keystore) and local_auth biometrics
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

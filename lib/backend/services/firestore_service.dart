@@ -1,36 +1,81 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../../core/errors/app_exception.dart';
 import 'notification_service.dart';
 
 class FirestoreService {
-  static final FirebaseFirestore _firestore =
-      FirebaseFirestore.instance;
-  static final FirebaseAuth _auth =
-      FirebaseAuth.instance;
+  static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
+  static final FirebaseAuth _auth = FirebaseAuth.instance;
 
-  static String get uid => _auth.currentUser!.uid;
+  static String get uid {
+    final user = _auth.currentUser;
+    if (user == null) throw const AuthException('User not authenticated');
+    return user.uid;
+  }
 
   static DocumentReference<Map<String, dynamic>> get _userDoc =>
       _firestore.collection('users').doc(uid);
+
+  // =========================================================
+  // ============= REACTIVE STREAM HELPER ====================
+  // =========================================================
+
+  /// Creates a Stream that automatically re-subscribes to the inner stream
+  /// whenever activeMemberId changes. This is the core fix for Issue 1.
+  static Stream<T> _memberStream<T>(
+    Stream<T> Function(String memberId) factory,
+  ) {
+    late StreamController<T> controller;
+    StreamSubscription? memberSub;
+    StreamSubscription? dataSub;
+
+    void subscribe(String memberId) {
+      dataSub?.cancel();
+      dataSub = factory(memberId).listen(
+        (data) => controller.add(data),
+        onError: (e) => controller.addError(e),
+      );
+    }
+
+    controller = StreamController<T>(
+      onListen: () {
+        memberSub = getActiveMemberId().listen((memberId) {
+          if (memberId != null) subscribe(memberId);
+        });
+      },
+      onCancel: () {
+        memberSub?.cancel();
+        dataSub?.cancel();
+      },
+    );
+
+    return controller.stream;
+  }
 
   // =========================================================
   // ================= MEMBER MANAGEMENT =====================
   // =========================================================
 
   static Future<void> createUserWithSelfMember(String name) async {
-    final memberRef = _userDoc.collection('members').doc();
+    try {
+      final memberRef = _userDoc.collection('members').doc();
 
-    await _userDoc.set({
-      'activeMemberId': memberRef.id,
-    });
+      await _userDoc.set({
+        'activeMemberId': memberRef.id,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
 
-    await memberRef.set({
-      'name': name,
-      'age': 0,
-      'relation': 'Self',
-      'isSelf': true,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+      await memberRef.set({
+        'name': name,
+        'age': 0,
+        'relation': 'Self',
+        'isSelf': true,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw FirestoreException('Failed to create user profile: $e');
+    }
   }
 
   static Future<void> addMember({
@@ -38,14 +83,30 @@ class FirestoreService {
     required int age,
     required String relation,
   }) async {
-    await _userDoc.collection('members').add({
-      'name': name,
-      'age': age,
-      'relation': relation,
-      'isSelf': false,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
+    try {
+      await _userDoc.collection('members').add({
+        'name': name,
+        'age': age,
+        'relation': relation,
+        'isSelf': false,
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw FirestoreException('Failed to add member: $e');
+    }
   }
+
+  // Alias for backward-compatibility with add_family_screen
+  static Future<void> addFamilyMember({
+    required String name,
+    required int age,
+    required String relation,
+    String gender = 'Not Specified',
+    String bloodGroup = '',
+    List<String> conditions = const [],
+    bool isPrimary = false,
+  }) =>
+      addMember(name: name, age: age, relation: relation);
 
   static Stream<QuerySnapshot<Map<String, dynamic>>> getMembers() {
     return _userDoc
@@ -54,8 +115,16 @@ class FirestoreService {
         .snapshots();
   }
 
+  // Alias for backward-compatibility with family_list_screen
+  static Stream<QuerySnapshot<Map<String, dynamic>>> getFamilyMembers() =>
+      getMembers();
+
   static Future<void> setActiveMember(String memberId) async {
-    await _userDoc.update({'activeMemberId': memberId});
+    try {
+      await _userDoc.update({'activeMemberId': memberId});
+    } catch (e) {
+      throw FirestoreException('Failed to switch member: $e');
+    }
   }
 
   static Stream<String?> getActiveMemberId() {
@@ -64,14 +133,20 @@ class FirestoreService {
     });
   }
 
-  static Future<String?> _getMemberId() async {
-    final snapshot = await _userDoc.get();
-    return snapshot.data()?['activeMemberId'];
+  static Future<String?> getActiveMemberIdOnce() => _getActiveMemberId();
+
+  static Future<String?> _getActiveMemberId() async {
+    try {
+      final snapshot = await _userDoc.get();
+      return snapshot.data()?['activeMemberId'] as String?;
+    } catch (e) {
+      return null;
+    }
   }
 
   static Future<CollectionReference<Map<String, dynamic>>?>
   getMemberCollection(String collectionName) async {
-    final memberId = await _getMemberId();
+    final memberId = await _getActiveMemberId();
     if (memberId == null) return null;
 
     return _userDoc
@@ -80,11 +155,9 @@ class FirestoreService {
         .collection(collectionName);
   }
 
-  static Stream<DocumentSnapshot<Map<String, dynamic>>> getActiveMember() async* {
-    final memberId = await _getMemberId();
-    if (memberId == null) return;
-
-    yield* _userDoc.collection('members').doc(memberId).snapshots();
+  static Stream<DocumentSnapshot<Map<String, dynamic>>> getActiveMember() {
+    return _memberStream((memberId) =>
+        _userDoc.collection('members').doc(memberId).snapshots());
   }
 
   static Stream<DocumentSnapshot<Map<String, dynamic>>> getAccountOwner() {
@@ -101,127 +174,27 @@ class FirestoreService {
     required int age,
     required String relation,
   }) async {
-    final memberId = await _getMemberId();
-    if (memberId == null) return;
+    try {
+      final memberId = await _getActiveMemberId();
+      if (memberId == null) return;
 
-    await _userDoc.collection('members').doc(memberId).update({
-      'name': name,
-      'age': age,
-      'relation': relation,
-    });
+      await _userDoc.collection('members').doc(memberId).update({
+        'name': name,
+        'age': age,
+        'relation': relation,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+    } catch (e) {
+      throw FirestoreException('Failed to update profile: $e');
+    }
   }
 
   // =========================================================
   // ================= PRESCRIPTIONS =========================
+  // NOTE: Prescription CRUD is now handled by PrescriptionFirestoreService.
+  // Only context helpers remain here for chatbot / dashboard use.
   // =========================================================
 
-  static Future<void> addPrescription({
-    required String medicineName,
-    required String foodTiming,
-    String? dosage,
-    required DateTime time,
-    String? notes,
-    DateTime? startDate,
-    DateTime? endDate,
-  }) async {
-    final collection =
-    await getMemberCollection('prescriptions');
-    if (collection == null) return;
-
-    final docRef = collection.doc();
-
-    final notificationId =
-    await NotificationService.scheduleDailyNotification(
-      title: medicineName,
-      body: foodTiming,
-      time: time,
-      payload: docRef.id,
-    );
-
-    await docRef.set({
-      'medicineName': medicineName,
-      'foodTiming': foodTiming,
-      'dosage': dosage ?? '',
-      'time': Timestamp.fromDate(time),
-      'notes': notes ?? '',
-      'startDate':
-      startDate != null ? Timestamp.fromDate(startDate) : null,
-      'endDate':
-      endDate != null ? Timestamp.fromDate(endDate) : null,
-      'notificationId': notificationId,
-      'createdAt': FieldValue.serverTimestamp(),
-    });
-  }
-
-  static Future<void> updatePrescription({
-    required String prescriptionId,
-    required String medicineName,
-    required String foodTiming,
-    String? dosage,
-    required DateTime time,
-    String? notes,
-    DateTime? startDate,
-    DateTime? endDate,
-  }) async {
-    final collection =
-    await getMemberCollection('prescriptions');
-    if (collection == null) return;
-
-    await collection.doc(prescriptionId).update({
-      'medicineName': medicineName,
-      'foodTiming': foodTiming,
-      'dosage': dosage ?? '',
-      'time': Timestamp.fromDate(time),
-      'notes': notes ?? '',
-      'startDate':
-      startDate != null ? Timestamp.fromDate(startDate) : null,
-      'endDate':
-      endDate != null ? Timestamp.fromDate(endDate) : null,
-    });
-  }
-
-  static Future<void> deletePrescription(
-      String prescriptionId, int notificationId) async {
-    final collection =
-    await getMemberCollection('prescriptions');
-    if (collection == null) return;
-
-    await NotificationService.cancelNotification(notificationId);
-    await collection.doc(prescriptionId).delete();
-  }
-
-  static Stream<QuerySnapshot<Map<String, dynamic>>>
-  getPrescriptions() async* {
-    final collection =
-    await getMemberCollection('prescriptions');
-    if (collection == null) return;
-
-    yield* collection
-        .orderBy('createdAt', descending: true)
-        .snapshots();
-  }
-
-  static Future<void> markMedicineStatus({
-    required String prescriptionId,
-    required String status,
-  }) async {
-    final collection =
-    await getMemberCollection('prescriptions');
-    if (collection == null) return;
-
-    final today = DateTime.now();
-    final dateId =
-        "${today.year}-${today.month}-${today.day}";
-
-    await collection
-        .doc(prescriptionId)
-        .collection('dailyStatus')
-        .doc(dateId)
-        .set({
-      'status': status,
-      'timestamp': FieldValue.serverTimestamp(),
-    });
-  }
 
   // =========================================================
   // ================= HEALTH MODULE =========================
@@ -233,8 +206,7 @@ class FirestoreService {
     required String unit,
     required DateTime recordDate,
   }) async {
-    final collection =
-    await getMemberCollection('bodyVitals');
+    final collection = await getMemberCollection('bodyVitals');
     if (collection == null) return;
 
     await collection.add({
@@ -242,11 +214,11 @@ class FirestoreService {
       'value': value,
       'unit': unit,
       'recordDate': Timestamp.fromDate(recordDate),
-      'recordTime': FieldValue.serverTimestamp(),
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
+  // BUG FIX: was using .add() — created duplicates instead of updating
   static Future<void> updateBodyVitalMetric({
     required String docId,
     required String type,
@@ -254,39 +226,32 @@ class FirestoreService {
     required String unit,
     required DateTime recordDate,
   }) async {
-    final collection =
-    await getMemberCollection('bodyVitals');
+    final collection = await getMemberCollection('bodyVitals');
     if (collection == null) return;
 
-    await collection.add({
+    await collection.doc(docId).update({
       'type': type,
       'value': value,
       'unit': unit,
       'recordDate': Timestamp.fromDate(recordDate),
-      'recordTime': FieldValue.serverTimestamp(),
-      'isEdited': true,
-      'editedFrom': docId,
-      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
   static Future<void> deleteBodyVital(String docId) async {
-    final collection =
-    await getMemberCollection('bodyVitals');
+    final collection = await getMemberCollection('bodyVitals');
     if (collection == null) return;
-
     await collection.doc(docId).delete();
   }
 
   static Stream<QuerySnapshot<Map<String, dynamic>>>
-  getBodyVitalMetrics() async* {
-    final collection =
-    await getMemberCollection('bodyVitals');
-    if (collection == null) return;
-
-    yield* collection
+      getBodyVitalMetrics() {
+    return _memberStream((memberId) => _userDoc
+        .collection('members')
+        .doc(memberId)
+        .collection('bodyVitals')
         .orderBy('recordDate', descending: true)
-        .snapshots();
+        .snapshots());
   }
 
   static Future<void> addBloodMetric({
@@ -295,8 +260,7 @@ class FirestoreService {
     required String unit,
     required DateTime recordDate,
   }) async {
-    final collection =
-    await getMemberCollection('bloodRecords');
+    final collection = await getMemberCollection('bloodRecords');
     if (collection == null) return;
 
     await collection.add({
@@ -304,11 +268,11 @@ class FirestoreService {
       'value': value,
       'unit': unit,
       'recordDate': Timestamp.fromDate(recordDate),
-      'recordTime': FieldValue.serverTimestamp(),
       'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
+  // BUG FIX: was using .add() — created duplicates instead of updating
   static Future<void> updateBloodMetric({
     required String docId,
     required String type,
@@ -316,39 +280,31 @@ class FirestoreService {
     required String unit,
     required DateTime recordDate,
   }) async {
-    final collection =
-    await getMemberCollection('bloodRecords');
+    final collection = await getMemberCollection('bloodRecords');
     if (collection == null) return;
 
-    await collection.add({
+    await collection.doc(docId).update({
       'type': type,
       'value': value,
       'unit': unit,
       'recordDate': Timestamp.fromDate(recordDate),
-      'recordTime': FieldValue.serverTimestamp(),
-      'isEdited': true,
-      'editedFrom': docId,
-      'createdAt': FieldValue.serverTimestamp(),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
   static Future<void> deleteBloodMetric(String docId) async {
-    final collection =
-    await getMemberCollection('bloodRecords');
+    final collection = await getMemberCollection('bloodRecords');
     if (collection == null) return;
-
     await collection.doc(docId).delete();
   }
 
-  static Stream<QuerySnapshot<Map<String, dynamic>>>
-  getBloodMetrics() async* {
-    final collection =
-    await getMemberCollection('bloodRecords');
-    if (collection == null) return;
-
-    yield* collection
+  static Stream<QuerySnapshot<Map<String, dynamic>>> getBloodMetrics() {
+    return _memberStream((memberId) => _userDoc
+        .collection('members')
+        .doc(memberId)
+        .collection('bloodRecords')
         .orderBy('recordDate', descending: true)
-        .snapshots();
+        .snapshots());
   }
 
   static Future<void> addCondition({
@@ -360,8 +316,7 @@ class FirestoreService {
     String? doctorName,
     String? notes,
   }) async {
-    final collection =
-    await getMemberCollection('conditions');
+    final collection = await getMemberCollection('conditions');
     if (collection == null) return;
 
     await collection.add({
@@ -386,8 +341,7 @@ class FirestoreService {
     required String doctorName,
     required String notes,
   }) async {
-    final collection =
-    await getMemberCollection('conditions');
+    final collection = await getMemberCollection('conditions');
     if (collection == null) return;
 
     await collection.doc(docId).update({
@@ -398,15 +352,23 @@ class FirestoreService {
       'medication': medication,
       'doctorName': doctorName,
       'notes': notes,
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
   static Future<void> deleteCondition(String docId) async {
-    final collection =
-    await getMemberCollection('conditions');
+    final collection = await getMemberCollection('conditions');
     if (collection == null) return;
-
     await collection.doc(docId).delete();
+  }
+
+  static Stream<QuerySnapshot<Map<String, dynamic>>> getConditions() {
+    return _memberStream((memberId) => _userDoc
+        .collection('members')
+        .doc(memberId)
+        .collection('conditions')
+        .orderBy('createdAt', descending: true)
+        .snapshots());
   }
 
   static Future<void> addOtherRecord({
@@ -414,8 +376,7 @@ class FirestoreService {
     required String measurement,
     required DateTime recordDate,
   }) async {
-    final collection =
-    await getMemberCollection('otherRecords');
+    final collection = await getMemberCollection('otherRecords');
     if (collection == null) return;
 
     await collection.add({
@@ -426,28 +387,241 @@ class FirestoreService {
     });
   }
 
+  // BUG FIX: was using .add() — created duplicates instead of updating
   static Future<void> updateOtherRecord({
     required String docId,
     required String recordName,
     required String measurement,
     required DateTime recordDate,
   }) async {
-    final collection =
-    await getMemberCollection('otherRecords');
+    final collection = await getMemberCollection('otherRecords');
     if (collection == null) return;
 
     await collection.doc(docId).update({
       'recordName': recordName,
       'measurement': measurement,
       'recordDate': Timestamp.fromDate(recordDate),
+      'updatedAt': FieldValue.serverTimestamp(),
     });
   }
 
   static Future<void> deleteOtherRecord(String docId) async {
-    final collection =
-    await getMemberCollection('otherRecords');
+    final collection = await getMemberCollection('otherRecords');
     if (collection == null) return;
-
     await collection.doc(docId).delete();
   }
+
+  static Stream<QuerySnapshot<Map<String, dynamic>>> getOtherRecords() {
+    return _memberStream((memberId) => _userDoc
+        .collection('members')
+        .doc(memberId)
+        .collection('otherRecords')
+        .orderBy('recordDate', descending: true)
+        .snapshots());
+  }
+
+  // =========================================================
+  // ================= CHATBOT CONTEXT =======================
+  // =========================================================
+
+  static Future<List<Map<String, dynamic>>>
+      getActivePrescriptionsForContext() async {
+    try {
+      final collection = await getMemberCollection('prescriptions');
+      if (collection == null) return [];
+      final snapshot = await collection.get();
+      return snapshot.docs.map((doc) => doc.data()).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getConditionsForContext() async {
+    try {
+      final collection = await getMemberCollection('conditions');
+      if (collection == null) return [];
+      final snapshot = await collection.get();
+      return snapshot.docs.map((doc) => doc.data()).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<List<Map<String, dynamic>>> getRecentVitalsForContext() async {
+    try {
+      final List<Map<String, dynamic>> result = [];
+
+      final bodyCollection = await getMemberCollection('bodyVitals');
+      if (bodyCollection != null) {
+        final snap = await bodyCollection
+            .orderBy('recordDate', descending: true)
+            .limit(5)
+            .get();
+        result.addAll(snap.docs.map((d) => d.data()));
+      }
+
+      final bloodCollection = await getMemberCollection('bloodRecords');
+      if (bloodCollection != null) {
+        final snap = await bloodCollection
+            .orderBy('recordDate', descending: true)
+            .limit(5)
+            .get();
+        result.addAll(snap.docs.map((d) => d.data()));
+      }
+
+      return result;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // =========================================================
+  // ================= DASHBOARD ANALYTICS ==================
+  // =========================================================
+
+  static Future<Map<String, int>> getWeeklyAdherenceCounts() async {
+    try {
+      final collection = await getMemberCollection('prescriptions');
+      if (collection == null) return {};
+
+      final prescriptionsSnap = await collection.get();
+      final Map<String, int> takenPerDay = {};
+
+      final last7 = List.generate(7, (i) {
+        final d = DateTime.now().subtract(Duration(days: 6 - i));
+        return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      });
+
+      for (final dateId in last7) {
+        takenPerDay[dateId] = 0;
+      }
+
+      for (final doc in prescriptionsSnap.docs) {
+        for (final dateId in last7) {
+          final statusDoc =
+              await doc.reference.collection('dailyStatus').doc(dateId).get();
+          if (statusDoc.exists && statusDoc.data()?['status'] == 'taken') {
+            takenPerDay[dateId] = (takenPerDay[dateId] ?? 0) + 1;
+          }
+        }
+      }
+
+      return takenPerDay;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  static Future<double> getWeeklyAdherenceRate() async {
+    try {
+      final collection = await getMemberCollection('prescriptions');
+      if (collection == null) return 0.0;
+
+      final prescriptionsSnap = await collection.get();
+      if (prescriptionsSnap.docs.isEmpty) return 0.0;
+
+      int total = 0;
+      int taken = 0;
+
+      final last7 = List.generate(7, (i) {
+        final d = DateTime.now().subtract(Duration(days: 6 - i));
+        return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      });
+
+      for (final doc in prescriptionsSnap.docs) {
+        for (final dateId in last7) {
+          total++;
+          final statusDoc =
+              await doc.reference.collection('dailyStatus').doc(dateId).get();
+          if (statusDoc.exists && statusDoc.data()?['status'] == 'taken') {
+            taken++;
+          }
+        }
+      }
+
+      return total == 0 ? 0.0 : taken / total;
+    } catch (_) {
+      return 0.0;
+    }
+  }
+
+  /// Monthly adherence — last 30 days count of taken doses per day
+  static Future<Map<String, int>> getMonthlyAdherenceCounts() async {
+    try {
+      final collection = await getMemberCollection('prescriptions');
+      if (collection == null) return {};
+
+      final prescriptionsSnap = await collection.get();
+      final Map<String, int> takenPerDay = {};
+
+      final last30 = List.generate(30, (i) {
+        final d = DateTime.now().subtract(Duration(days: 29 - i));
+        return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      });
+
+      for (final dateId in last30) {
+        takenPerDay[dateId] = 0;
+      }
+
+      for (final doc in prescriptionsSnap.docs) {
+        for (final dateId in last30) {
+          final statusDoc =
+              await doc.reference.collection('dailyStatus').doc(dateId).get();
+          if (statusDoc.exists && statusDoc.data()?['status'] == 'taken') {
+            takenPerDay[dateId] = (takenPerDay[dateId] ?? 0) + 1;
+          }
+        }
+      }
+
+      return takenPerDay;
+    } catch (_) {
+      return {};
+    }
+  }
+
+  /// Monthly adherence rate — 0.0 to 1.0
+  static Future<double> getMonthlyAdherenceRate() async {
+    try {
+      final collection = await getMemberCollection('prescriptions');
+      if (collection == null) return 0.0;
+
+      final prescriptionsSnap = await collection.get();
+      if (prescriptionsSnap.docs.isEmpty) return 0.0;
+
+      int total = 0;
+      int taken = 0;
+
+      final last30 = List.generate(30, (i) {
+        final d = DateTime.now().subtract(Duration(days: 29 - i));
+        return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+      });
+
+      for (final doc in prescriptionsSnap.docs) {
+        for (final dateId in last30) {
+          total++;
+          final statusDoc =
+              await doc.reference.collection('dailyStatus').doc(dateId).get();
+          if (statusDoc.exists && statusDoc.data()?['status'] == 'taken') {
+            taken++;
+          }
+        }
+      }
+
+      return total == 0 ? 0.0 : taken / total;
+    } catch (_) {
+      return 0.0;
+    }
+  }
+
+  /// Stream of body vitals for the active member (real-time)
+  static Stream<QuerySnapshot<Map<String, dynamic>>> getBodyVitals() {
+    return _memberStream((memberId) => _userDoc
+        .collection('members')
+        .doc(memberId)
+        .collection('bodyVitals')
+        .orderBy('recordDate', descending: true)
+        .limit(10)
+        .snapshots());
+  }
 }
+

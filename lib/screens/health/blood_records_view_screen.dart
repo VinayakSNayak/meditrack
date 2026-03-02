@@ -10,17 +10,16 @@ class BloodRecordsViewScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: const Color(0xFFF4F6FA),
-        foregroundColor: Colors.black,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        foregroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white
+            : Colors.black,
         title: const Text(
           "Blood Records",
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 20,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20),
         ),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -79,26 +78,24 @@ class BloodRecordsViewScreen extends StatelessWidget {
                 margin: const EdgeInsets.only(bottom: 18),
                 padding: const EdgeInsets.all(22),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: Theme.of(context).cardColor,
                   borderRadius: BorderRadius.circular(22),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.deepPurple.withOpacity(0.06),
+                      color: Colors.black.withValues(alpha: 0.06),
                       blurRadius: 14,
                       offset: const Offset(0, 6),
                     )
                   ],
                 ),
                 child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment.start,
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       data['type'],
                       style: const TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w600,
-                        color: Colors.black87,
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -131,7 +128,7 @@ class BloodRecordsViewScreen extends StatelessWidget {
                                       AddMetricScreen(
                                         metricType:
                                         data['type'],
-                                        category: "blood",
+                                        category: 'bloodRecords',
                                         existingData:
                                         data,
                                         docId: doc.id,

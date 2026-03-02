@@ -10,17 +10,16 @@ class BodyVitalsViewScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6FA),
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: const Color(0xFFF4F6FA),
-        foregroundColor: Colors.black,
+        backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+        foregroundColor: Theme.of(context).brightness == Brightness.dark
+            ? Colors.white
+            : Colors.black,
         title: const Text(
           "Body Vitals",
-          style: TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 20,
-          ),
+          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20),
         ),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
@@ -98,15 +97,16 @@ class BodyVitalsViewScreen extends StatelessWidget {
         required String docId,
         required Map<String, dynamic> fullData,
       }) {
+    final cardBg = Theme.of(context).cardColor;
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: cardBg,
         borderRadius: BorderRadius.circular(22),
         boxShadow: [
           BoxShadow(
-            color: Colors.indigo.withOpacity(0.06),
+            color: Colors.black.withValues(alpha: 0.06),
             blurRadius: 14,
             offset: const Offset(0, 6),
           )
@@ -115,101 +115,70 @@ class BodyVitalsViewScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            type,
-            style: const TextStyle(
-              fontSize: 17,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
+          Text(type,
+              style: const TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.w600)),
           const SizedBox(height: 10),
-          Text(
-            "$value $unit",
-            style: const TextStyle(
-              fontSize: 20,
-              fontWeight: FontWeight.w500,
-              color: Colors.black87,
-            ),
-          ),
+          Text("$value $unit",
+              style: const TextStyle(
+                  fontSize: 20, fontWeight: FontWeight.w500)),
           const SizedBox(height: 18),
           Row(
             children: [
               Expanded(
                 child: OutlinedButton(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: Colors.indigo,
-                    side: const BorderSide(
-                      color: Colors.indigo,
-                      width: 1.3,
-                    ),
+                    foregroundColor: Colors.green,
+                    side: const BorderSide(color: Colors.green, width: 1.3),
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                      BorderRadius.circular(14),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 12),
+                        borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) => AddMetricScreen(
-                          metricType: type,
-                          category: "body",
-                          existingData: fullData,
-                          docId: docId,
-                        ),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => AddMetricScreen(
+                        metricType: type,
+                        category: 'bodyVitals',
+                        existingData: fullData,
+                        docId: docId,
                       ),
-                    );
-                  },
-                  child: const Text("Edit"),
+                    ),
+                  ),
+                  child: const Text('Edit'),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                    Colors.green.shade600,
+                    backgroundColor: Colors.blue,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                      BorderRadius.circular(14),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 12),
+                        borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            BodyVitalsHistoryScreen(
-                              metricType: type,
-                            ),
-                      ),
-                    );
-                  },
-                  child: const Text("History"),
+                  onPressed: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => BodyVitalsHistoryScreen(metricType: type),
+                    ),
+                  ),
+                  child: const Text('History'),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                    Colors.red.shade400,
+                    backgroundColor: Colors.redAccent,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                      BorderRadius.circular(14),
-                    ),
-                    padding: const EdgeInsets.symmetric(
-                        vertical: 12),
+                        borderRadius: BorderRadius.circular(14)),
+                    padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  onPressed: () =>
-                      _confirmDelete(context, docId),
-                  child: const Text("Delete"),
+                  onPressed: () => _confirmDelete(context, docId),
+                  child: const Text('Delete'),
                 ),
               ),
             ],

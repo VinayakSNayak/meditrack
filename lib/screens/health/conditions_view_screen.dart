@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../backend/services/firestore_service.dart';
 import 'add_condition_screen.dart';
-import 'conditions_history_screen.dart';
 
 class ConditionsViewScreen extends StatelessWidget {
   const ConditionsViewScreen({super.key});
@@ -21,7 +20,7 @@ class ConditionsViewScreen extends StatelessWidget {
         ),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _getConditionsStream(),
+        stream: FirestoreService.getConditions(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -54,15 +53,6 @@ class ConditionsViewScreen extends StatelessWidget {
     );
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _getConditionsStream() async* {
-    final collection =
-    await FirestoreService.getMemberCollection('conditions');
-    if (collection == null) return;
-
-    yield* collection
-        .orderBy('createdAt', descending: true)
-        .snapshots();
-  }
 
   Widget _conditionCard(
       BuildContext context, {
@@ -71,6 +61,28 @@ class ConditionsViewScreen extends StatelessWidget {
       }) {
     final timestamp = data['diagnosedDate'] as Timestamp?;
     final date = timestamp?.toDate();
+    final status = data['status'] ?? "Unknown";
+
+    Color badgeColor;
+    Color textColor;
+
+    switch (status) {
+      case "Active":
+        badgeColor = Colors.red.shade100;
+        textColor = Colors.red.shade700;
+        break;
+      case "Recovered":
+        badgeColor = Colors.green.shade100;
+        textColor = Colors.green.shade700;
+        break;
+      case "Under Treatment":
+        badgeColor = Colors.orange.shade100;
+        textColor = Colors.orange.shade700;
+        break;
+      default:
+        badgeColor = Colors.grey.shade200;
+        textColor = Colors.grey.shade700;
+    }
 
     return Container(
       margin: const EdgeInsets.only(bottom: 18),
@@ -82,6 +94,8 @@ class ConditionsViewScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+
+          /// CONDITION NAME
           Text(
             data['conditionName'] ?? "",
             style: const TextStyle(
@@ -89,17 +103,35 @@ class ConditionsViewScreen extends StatelessWidget {
               fontWeight: FontWeight.w600,
             ),
           ),
-          const SizedBox(height: 6),
-          Text(
-            "Status: ${data['status']}",
-            style: const TextStyle(fontSize: 14),
+
+          const SizedBox(height: 10),
+
+          /// STATUS BADGE
+          Container(
+            padding: const EdgeInsets.symmetric(
+                horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: badgeColor,
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Text(
+              status,
+              style: TextStyle(
+                fontWeight: FontWeight.w600,
+                color: textColor,
+              ),
+            ),
           ),
+
+          const SizedBox(height: 10),
+
           if (data['hasMedication'] == true &&
               (data['medication'] ?? "").isNotEmpty)
             Text(
               "Medication: ${data['medication']}",
               style: const TextStyle(fontSize: 14),
             ),
+
           if (date != null)
             Text(
               "Diagnosed: ${date.day}/${date.month}/${date.year}",
@@ -108,7 +140,10 @@ class ConditionsViewScreen extends StatelessWidget {
                 color: Colors.black54,
               ),
             ),
+
           const SizedBox(height: 14),
+
+          /// BUTTON ROW (History Removed)
           Row(
             children: [
               Expanded(
@@ -131,30 +166,7 @@ class ConditionsViewScreen extends StatelessWidget {
               Expanded(
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                    Colors.green.shade600,
-                  ),
-                  onPressed: () {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            ConditionsHistoryScreen(
-                              conditionName:
-                              data['conditionName'],
-                            ),
-                      ),
-                    );
-                  },
-                  child: const Text("History"),
-                ),
-              ),
-              const SizedBox(width: 10),
-              Expanded(
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                    Colors.red.shade400,
+                    backgroundColor: Colors.red.shade400,
                   ),
                   onPressed: () =>
                       _confirmDelete(context, docId),
@@ -174,27 +186,23 @@ class ConditionsViewScreen extends StatelessWidget {
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(16),
         ),
         title: const Text("Delete Condition?"),
         content: const Text(
             "This will permanently remove this condition."),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(context),
+            onPressed: () => Navigator.pop(context),
             child: const Text("Cancel"),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-              Colors.red.shade400,
+              backgroundColor: Colors.red.shade400,
             ),
             onPressed: () async {
               Navigator.pop(context);
-              await FirestoreService
-                  .deleteCondition(docId);
+              await FirestoreService.deleteCondition(docId);
             },
             child: const Text("Delete"),
           ),

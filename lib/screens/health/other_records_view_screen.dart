@@ -21,7 +21,7 @@ class OtherRecordsViewScreen extends StatelessWidget {
         ),
       ),
       body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: _getOtherRecordsStream(),
+        stream: FirestoreService.getOtherRecords(),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
             return const Center(child: CircularProgressIndicator());
@@ -54,15 +54,6 @@ class OtherRecordsViewScreen extends StatelessWidget {
     );
   }
 
-  Stream<QuerySnapshot<Map<String, dynamic>>> _getOtherRecordsStream() async* {
-    final collection =
-    await FirestoreService.getMemberCollection('otherRecords');
-    if (collection == null) return;
-
-    yield* collection
-        .orderBy('recordDate', descending: true)
-        .snapshots();
-  }
 
   Widget _recordCard(
       BuildContext context, {

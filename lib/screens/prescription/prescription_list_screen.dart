@@ -1,295 +1,282 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../backend/services/firestore_service.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import '../../backend/services/prescription_firestore_service.dart';
+import '../../models/prescription_model.dart';
+import '../../providers/member_provider.dart';
 import 'add_prescription_screen.dart';
+import 'prescription_detail_screen.dart'; // detail + medicines
 
 class PrescriptionListScreen extends StatelessWidget {
   const PrescriptionListScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F4FA),
+      backgroundColor: bg,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: const Color(0xFFF1F4FA),
-        foregroundColor: Colors.black,
-        title: const Text(
-          'Prescriptions',
-          style: TextStyle(fontWeight: FontWeight.w600),
-        ),
+        backgroundColor: bg,
+        foregroundColor: isDark ? Colors.white : Colors.black,
+        title: const Text('Prescriptions',
+            style: TextStyle(fontWeight: FontWeight.w600)),
       ),
       floatingActionButton: FloatingActionButton(
         backgroundColor: Colors.green,
-        onPressed: () {
-          Navigator.push(
-            context,
-            MaterialPageRoute(
-              builder: (_) =>
-              const AddPrescriptionScreen(),
-            ),
-          );
-        },
+        onPressed: () => Navigator.push(context,
+            MaterialPageRoute(builder: (_) => const AddPrescriptionScreen())),
         child: const Icon(Icons.add),
       ),
-      body: Padding(
-        padding: const EdgeInsets.all(20),
-        child: StreamBuilder<QuerySnapshot>(
-          stream:
-          FirestoreService.getPrescriptions(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData ||
-                snapshot.data!.docs.isEmpty) {
-              return const Center(
-                child: Text(
-                  'No prescriptions added',
-                  style: TextStyle(
-                      color: Colors.grey),
-                ),
+      body: Consumer<MemberProvider>(
+        builder: (context, memberProvider, _) {
+          final memberId = memberProvider.activeMemberId;
+          if (memberId == null) {
+            return const Center(
+                child: Text('No profile selected',
+                    style: TextStyle(color: Colors.grey)));
+          }
+          return StreamBuilder<List<PrescriptionModel>>(
+            stream: PrescriptionFirestoreService.prescriptionsStream(memberId),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting) {
+                return const Center(child: CircularProgressIndicator());
+              }
+              if (!snapshot.hasData || snapshot.data!.isEmpty) {
+                return _emptyState();
+              }
+              final prescriptions = snapshot.data!;
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 100),
+                itemCount: prescriptions.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 14),
+                itemBuilder: (context, i) =>
+                    _PrescriptionCard(prescription: prescriptions[i],
+                        memberId: memberId),
               );
-            }
+            },
+          );
+        },
+      ),
+    );
+  }
 
-            final docs =
-                snapshot.data!.docs;
+  Widget _emptyState() {
+    return const Center(
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.description_outlined, size: 64, color: Colors.grey),
+          SizedBox(height: 16),
+          Text('No prescriptions added',
+              style: TextStyle(color: Colors.grey, fontSize: 15)),
+          SizedBox(height: 6),
+          Text('Tap + to create your first prescription',
+              style: TextStyle(color: Colors.grey, fontSize: 12)),
+        ],
+      ),
+    );
+  }
+}
 
-            return ListView.builder(
-              itemCount: docs.length,
-              itemBuilder:
-                  (context, index) {
-                final doc =
-                docs[index];
-                final data = doc.data()
-                as Map<String,
-                    dynamic>;
+class _PrescriptionCard extends StatelessWidget {
+  final PrescriptionModel prescription;
+  final String memberId;
+  const _PrescriptionCard(
+      {required this.prescription, required this.memberId});
 
-                final name =
-                    data['medicineName'] ??
-                        '';
-                final dosage =
-                    data['dosage'] ??
-                        '';
-                final foodTiming =
-                    data['foodTiming'] ??
-                        '';
-                final timeStamp =
-                data['time']
-                as Timestamp?;
-                final startStamp =
-                data['startDate']
-                as Timestamp?;
-                final endStamp =
-                data['endDate']
-                as Timestamp?;
-                final notificationId =
-                    data['notificationId'] ??
-                        0;
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardColor = Theme.of(context).cardColor;
+    final dateStr =
+        DateFormat('dd MMM yyyy').format(prescription.visitDate);
 
-                final time =
-                timeStamp != null
-                    ? TimeOfDay
-                    .fromDateTime(
-                    timeStamp
-                        .toDate())
-                    .format(
-                    context)
-                    : '';
-
-                final startDate =
-                startStamp != null
-                    ? startStamp
-                    .toDate()
-                    : null;
-
-                final endDate =
-                endStamp != null
-                    ? endStamp
-                    .toDate()
-                    : null;
-
-                return _prescriptionCard(
-                  context: context,
-                  id: doc.id,
-                  notificationId:
-                  notificationId,
-                  data: data,
-                  name: name,
-                  dosage: dosage,
-                  foodTiming:
-                  foodTiming,
-                  time: time,
-                  startDate:
-                  startDate,
-                  endDate:
-                  endDate,
-                );
-              },
-            );
-          },
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PrescriptionDetailScreen(
+            prescription: prescription,
+            memberId: memberId,
+          ),
+        ),
+      ),
+      child: Container(
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.06),
+              blurRadius: 14,
+              offset: const Offset(0, 5),
+            )
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image thumbnail (if available)
+            if (prescription.imageUrl != null)
+              ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(22)),
+                child: Image.network(
+                  prescription.imageUrl!,
+                  height: 140,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  errorBuilder: (_, __, ___) => const SizedBox(),
+                ),
+              ),
+            Padding(
+              padding: const EdgeInsets.all(18),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Icon badge
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: const Icon(Icons.description_outlined,
+                        color: Colors.green, size: 26),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          prescription.name.isNotEmpty
+                              ? prescription.name
+                              : 'Prescription',
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 4),
+                        if (prescription.hospitalName.isNotEmpty)
+                          Text(
+                            prescription.hospitalName,
+                            style: TextStyle(
+                                fontSize: 13,
+                                color: isDark
+                                    ? Colors.grey.shade400
+                                    : Colors.grey.shade600),
+                          ),
+                        if (prescription.diagnosis.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Text(
+                              prescription.diagnosis,
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  color: isDark
+                                      ? Colors.grey.shade500
+                                      : Colors.grey.shade500),
+                            ),
+                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            _pill(Icons.calendar_today_outlined, dateStr,
+                                Colors.blue),
+                            const SizedBox(width: 8),
+                            _pill(
+                                Icons.medication_outlined,
+                                '${prescription.medicineCount} medicine${prescription.medicineCount != 1 ? 's' : ''}',
+                                Colors.green),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // More menu
+                  PopupMenuButton<String>(
+                    iconColor: Colors.grey,
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(value: 'edit', child: Text('Edit')),
+                      PopupMenuItem(
+                          value: 'delete',
+                          child: Text('Delete',
+                              style: TextStyle(color: Colors.red))),
+                    ],
+                    onSelected: (value) async {
+                      if (value == 'edit') {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (_) => AddPrescriptionScreen(
+                              prescriptionId: prescription.id,
+                              existingData: prescription,
+                              memberId: memberId,
+                            ),
+                          ),
+                        );
+                      } else if (value == 'delete') {
+                        await _confirmDelete(context);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
-  Widget _prescriptionCard({
-    required BuildContext context,
-    required String id,
-    required int notificationId,
-    required Map<String, dynamic>
-    data,
-    required String name,
-    required String dosage,
-    required String foodTiming,
-    required String time,
-    required DateTime? startDate,
-    required DateTime? endDate,
-  }) {
+  Widget _pill(IconData icon, String label, Color color) {
     return Container(
-      margin:
-      const EdgeInsets.only(
-          bottom: 16),
-      padding:
-      const EdgeInsets.all(20),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius:
-        BorderRadius.circular(26),
-        boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 14,
-            offset: Offset(0, 6),
-          ),
-        ],
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(20),
       ),
-      child: Column(
-        crossAxisAlignment:
-        CrossAxisAlignment.start,
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Container(
-                padding:
-                const EdgeInsets
-                    .all(14),
-                decoration:
-                BoxDecoration(
-                  color:
-                  const Color(
-                      0xFFEFF5FF),
-                  borderRadius:
-                  BorderRadius
-                      .circular(20),
-                ),
-                child: const Icon(
-                  Icons.medication,
-                  color: Colors.blue,
-                  size: 28,
-                ),
-              ),
-              const SizedBox(
-                  width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment:
-                  CrossAxisAlignment
-                      .start,
-                  children: [
-                    Text(
-                      name,
-                      style:
-                      const TextStyle(
-                        fontSize: 16,
-                        fontWeight:
-                        FontWeight
-                            .w600,
-                      ),
-                    ),
-                    const SizedBox(
-                        height: 6),
-                    Text(
-                      [
-                        if (dosage
-                            .isNotEmpty)
-                          dosage,
-                        foodTiming,
-                        time,
-                      ].join(' • '),
-                      style:
-                      const TextStyle(
-                        color:
-                        Colors.grey,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              PopupMenuButton(
-                itemBuilder:
-                    (context) => const [
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: Text('Edit'),
-                  ),
-                  PopupMenuItem(
-                    value: 'delete',
-                    child: Text('Delete'),
-                  ),
-                ],
-                onSelected:
-                    (value) async {
-                  if (value ==
-                      'edit') {
-                    Navigator.push(
-                      context,
-                      MaterialPageRoute(
-                        builder: (_) =>
-                            AddPrescriptionScreen(
-                              prescriptionId:
-                              id,
-                              existingData:
-                              data,
-                            ),
-                      ),
-                    );
-                  }
-
-                  if (value ==
-                      'delete') {
-                    await FirestoreService
-                        .deletePrescription(
-                      id,
-                      notificationId,
-                    );
-                  }
-                },
-              )
-            ],
-          ),
-          if (startDate != null ||
-              endDate != null)
-            Padding(
-              padding:
-              const EdgeInsets
-                  .only(top: 10),
-              child: Text(
-                [
-                  if (startDate !=
-                      null)
-                    "Start: ${startDate.day}/${startDate.month}/${startDate.year}",
-                  if (endDate !=
-                      null)
-                    "End: ${endDate.day}/${endDate.month}/${endDate.year}",
-                ].join("   "),
-                style:
-                const TextStyle(
-                  fontSize: 12,
-                  color:
-                  Colors.black54,
-                ),
-              ),
-            ),
+          Icon(icon, size: 11, color: color),
+          const SizedBox(width: 4),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11, color: color, fontWeight: FontWeight.w600)),
         ],
       ),
     );
+  }
+
+  Future<void> _confirmDelete(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: const Text('Delete Prescription?'),
+        content: const Text(
+            'This will delete the prescription and all its medicines. This cannot be undone.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel')),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Delete', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await PrescriptionFirestoreService.deletePrescription(
+        memberId: memberId,
+        prescriptionId: prescription.id,
+      );
+    }
   }
 }

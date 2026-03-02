@@ -129,21 +129,21 @@ class _AddMetricScreenState extends State<AddMetricScreen> {
   @override
   Widget build(BuildContext context) {
     final unit = _getUnit(widget.metricType);
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final bg = theme.scaffoldBackgroundColor;
+    final cardBg = theme.cardColor;
+    final labelColor = isDark ? Colors.white70 : Colors.grey.shade600;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF4F6FA),
+      backgroundColor: bg,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor: const Color(0xFFF4F6FA),
-        foregroundColor: Colors.black,
+        backgroundColor: bg,
+        foregroundColor: isDark ? Colors.white : Colors.black,
         title: Text(
-          isEditing
-              ? "Edit ${widget.metricType}"
-              : "Add ${widget.metricType}",
-          style: const TextStyle(
-            fontWeight: FontWeight.w600,
-            fontSize: 20,
-          ),
+          isEditing ? "Edit ${widget.metricType}" : "Add ${widget.metricType}",
+          style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 20),
         ),
       ),
       body: Padding(
@@ -152,17 +152,16 @@ class _AddMetricScreenState extends State<AddMetricScreen> {
           key: _formKey,
           child: Column(
             children: [
-
               /// VALUE FIELD CARD
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 20, vertical: 22),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: cardBg,
                   borderRadius: BorderRadius.circular(22),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.indigo.withOpacity(0.08),
+                      color: Colors.black.withValues(alpha: 0.06),
                       blurRadius: 16,
                       offset: const Offset(0, 6),
                     )
@@ -170,30 +169,20 @@ class _AddMetricScreenState extends State<AddMetricScreen> {
                 ),
                 child: TextFormField(
                   controller: valueController,
-                  keyboardType:
-                  widget.metricType == "Blood Pressure"
+                  keyboardType: widget.metricType == "Blood Pressure"
                       ? TextInputType.text
                       : const TextInputType.numberWithOptions(decimal: true),
                   validator: (value) =>
-                  value == null || value.isEmpty
-                      ? "Required"
-                      : null,
-                  style: const TextStyle(
-                    fontSize: 18,
-                  ),
+                      value == null || value.isEmpty ? "Required" : null,
+                  style: TextStyle(
+                      fontSize: 18, color: isDark ? Colors.white : Colors.black),
                   decoration: InputDecoration(
                     labelText: "Value",
-                    hintText:
-                    "${_getPlaceholder(widget.metricType)} $unit",
-                    hintStyle: TextStyle(
-                      color: Colors.grey.shade400,
-                      fontSize: 16,
-                    ),
+                    hintText: "${_getPlaceholder(widget.metricType)} $unit",
+                    hintStyle: TextStyle(color: labelColor, fontSize: 16),
                     suffixText: unit,
                     suffixStyle: TextStyle(
-                      color: Colors.grey.shade600,
-                      fontWeight: FontWeight.w500,
-                    ),
+                        color: labelColor, fontWeight: FontWeight.w500),
                     border: InputBorder.none,
                   ),
                 ),
@@ -204,36 +193,27 @@ class _AddMetricScreenState extends State<AddMetricScreen> {
               /// DATE PICKER CARD
               Container(
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: cardBg,
                   borderRadius: BorderRadius.circular(22),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.indigo.withOpacity(0.06),
+                      color: Colors.black.withValues(alpha: 0.04),
                       blurRadius: 12,
                       offset: const Offset(0, 4),
                     )
                   ],
                 ),
                 child: ListTile(
-                  contentPadding:
-                  const EdgeInsets.symmetric(
+                  contentPadding: const EdgeInsets.symmetric(
                       horizontal: 20, vertical: 10),
-                  title: const Text(
-                    "Record Date",
-                    style: TextStyle(
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
+                  title: const Text("Record Date",
+                      style: TextStyle(fontWeight: FontWeight.w500)),
                   subtitle: Text(
                     "${selectedDate.day}/${selectedDate.month}/${selectedDate.year}",
-                    style: const TextStyle(
-                      fontSize: 15,
-                    ),
+                    style: const TextStyle(fontSize: 15),
                   ),
-                  trailing: const Icon(
-                    Icons.calendar_today,
-                    color: Colors.indigo,
-                  ),
+                  trailing:
+                      const Icon(Icons.calendar_today, color: Colors.indigo),
                   onTap: () async {
                     final picked = await showDatePicker(
                       context: context,
@@ -241,11 +221,7 @@ class _AddMetricScreenState extends State<AddMetricScreen> {
                       firstDate: DateTime(2000),
                       lastDate: DateTime.now(),
                     );
-                    if (picked != null) {
-                      setState(() {
-                        selectedDate = picked;
-                      });
-                    }
+                    if (picked != null) setState(() => selectedDate = picked);
                   },
                 ),
               ),
@@ -257,35 +233,25 @@ class _AddMetricScreenState extends State<AddMetricScreen> {
                 width: double.infinity,
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                    const Color(0xFF3949AB),
+                    backgroundColor: Colors.green,
                     foregroundColor: Colors.white,
-                    padding:
-                    const EdgeInsets.symmetric(vertical: 16),
+                    padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                      BorderRadius.circular(18),
-                    ),
+                        borderRadius: BorderRadius.circular(18)),
                     elevation: 4,
                   ),
                   onPressed: isSaving ? null : _save,
                   child: isSaving
                       ? const SizedBox(
-                    height: 22,
-                    width: 22,
-                    child:
-                    CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      color: Colors.white,
-                    ),
-                  )
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: Colors.white))
                       : Text(
-                    isEditing ? "Update" : "Save",
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
+                          isEditing ? "Update" : "Save",
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
                 ),
               ),
             ],
@@ -305,7 +271,7 @@ class _AddMetricScreenState extends State<AddMetricScreen> {
     final unit = _getUnit(widget.metricType);
 
     try {
-      if (widget.category == "body") {
+      if (widget.category == 'bodyVitals' || widget.category == 'body') {
         if (isEditing) {
           await FirestoreService.updateBodyVitalMetric(
             docId: widget.docId!,

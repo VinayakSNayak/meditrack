@@ -1,515 +1,374 @@
 import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import '../../backend/services/firestore_service.dart';
-import '../../backend/services/ocr_service.dart';
+import 'dart:io';
+import 'package:image_picker/image_picker.dart';
+import 'package:intl/intl.dart';
+import 'package:provider/provider.dart';
+import '../../backend/services/prescription_firestore_service.dart';
+import '../../models/prescription_model.dart';
+import '../../providers/member_provider.dart';
+import 'prescription_detail_screen.dart'; // navigate after creation
 
 class AddPrescriptionScreen extends StatefulWidget {
   final String? prescriptionId;
-  final Map<String, dynamic>? existingData;
+  final PrescriptionModel? existingData;
+  final String? memberId;
 
   const AddPrescriptionScreen({
     super.key,
     this.prescriptionId,
     this.existingData,
+    this.memberId,
   });
 
   @override
-  State<AddPrescriptionScreen> createState() =>
-      _AddPrescriptionScreenState();
+  State<AddPrescriptionScreen> createState() => _AddPrescriptionScreenState();
 }
 
-class _AddPrescriptionScreenState
-    extends State<AddPrescriptionScreen> {
-  final TextEditingController _medicineController =
-  TextEditingController();
-  final TextEditingController _dosageController =
-  TextEditingController();
-  final TextEditingController _notesController =
-  TextEditingController();
+class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _hospitalCtrl = TextEditingController();
+  final _diagnosisCtrl = TextEditingController();
 
-  String _foodTiming = "After Food";
-  DateTime? _selectedTime;
-  DateTime? _startDate;
-  DateTime? _endDate;
-  bool _isScanning = false;
+  DateTime _visitDate = DateTime.now();
+  File? _imageFile;
+  bool _removeExistingImage = false;
+  bool _isSaving = false;
+
+  bool get _isEditing => widget.prescriptionId != null;
 
   @override
   void initState() {
     super.initState();
     if (widget.existingData != null) {
-      final data = widget.existingData!;
-      _medicineController.text =
-          data['medicineName'] ?? '';
-      _dosageController.text =
-          data['dosage'] ?? '';
-      _notesController.text =
-          data['notes'] ?? '';
-      _foodTiming =
-          data['foodTiming'] ?? "After Food";
-      _selectedTime =
-          (data['time'] as Timestamp?)
-              ?.toDate();
-      _startDate =
-          (data['startDate'] as Timestamp?)
-              ?.toDate();
-      _endDate =
-          (data['endDate'] as Timestamp?)
-              ?.toDate();
+      final d = widget.existingData!;
+      _nameCtrl.text = d.name;
+      _hospitalCtrl.text = d.hospitalName;
+      _diagnosisCtrl.text = d.diagnosis;
+      _visitDate = d.visitDate;
     }
   }
 
-  Future<void> _scanPrescription() async {
-    showModalBottomSheet(
-      context: context,
-      builder: (context) {
-        return SafeArea(
-          child: Column(
-            mainAxisSize:
-            MainAxisSize.min,
-            children: [
-              ListTile(
-                leading:
-                const Icon(Icons.camera_alt),
-                title: const Text(
-                    "Scan from Camera"),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _handleScan(
-                      OcrService
-                          .scanFromCamera);
-                },
-              ),
-              ListTile(
-                leading:
-                const Icon(Icons.photo),
-                title: const Text(
-                    "Pick from Gallery"),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await _handleScan(
-                      OcrService
-                          .scanFromGallery);
-                },
-              ),
-            ],
-          ),
-        );
-      },
-    );
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _hospitalCtrl.dispose();
+    _diagnosisCtrl.dispose();
+    super.dispose();
   }
 
-  Future<void> _handleScan(
-      Future<String?> Function()
-      scanner) async {
-    setState(() {
-      _isScanning = true;
-    });
-
-    final result = await scanner();
-
-    setState(() {
-      _isScanning = false;
-    });
-
-    if (result != null &&
-        result.trim().isNotEmpty) {
-      _medicineController.text =
-          result.trim();
-    } else {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-            .showSnackBar(
-          const SnackBar(
-            content: Text(
-                "Could not detect medicine name"),
-          ),
-        );
-      }
-    }
-  }
-
-  Future<void> _pickTime() async {
-    final picked =
-    await showTimePicker(
-      context: context,
-      initialTime:
-      TimeOfDay.now(),
-    );
-    if (picked != null) {
-      final now =
-      DateTime.now();
+  Future<void> _pickImage(ImageSource source) async {
+    final picker = ImagePicker();
+    final xfile = await picker.pickImage(source: source, imageQuality: 85);
+    if (xfile != null) {
       setState(() {
-        _selectedTime =
-            DateTime(
-              now.year,
-              now.month,
-              now.day,
-              picked.hour,
-              picked.minute,
-            );
-      });
-    }
-  }
-
-  Future<void> _pickStartDate() async {
-    final picked =
-    await showDatePicker(
-      context: context,
-      initialDate:
-      DateTime.now(),
-      firstDate:
-      DateTime(2023),
-      lastDate:
-      DateTime(2100),
-    );
-    if (picked != null) {
-      setState(() {
-        _startDate = picked;
-      });
-    }
-  }
-
-  Future<void> _pickEndDate() async {
-    final picked =
-    await showDatePicker(
-      context: context,
-      initialDate:
-      DateTime.now(),
-      firstDate:
-      DateTime(2023),
-      lastDate:
-      DateTime(2100),
-    );
-    if (picked != null) {
-      setState(() {
-        _endDate = picked;
+        _imageFile = File(xfile.path);
+        _removeExistingImage = false;
       });
     }
   }
 
   Future<void> _save() async {
-    if (_medicineController.text
-        .trim()
-        .isEmpty ||
-        _selectedTime == null) {
-      return;
-    }
+    if (!_formKey.currentState!.validate()) return;
+    setState(() => _isSaving = true);
 
-    if (widget.prescriptionId ==
-        null) {
-      await FirestoreService
-          .addPrescription(
-        medicineName:
-        _medicineController
-            .text
-            .trim(),
-        foodTiming:
-        _foodTiming,
-        dosage:
-        _dosageController
-            .text
-            .trim(),
-        time:
-        _selectedTime!,
-        notes:
-        _notesController
-            .text
-            .trim(),
-        startDate:
-        _startDate,
-        endDate:
-        _endDate,
-      );
-    } else {
-      await FirestoreService
-          .updatePrescription(
-        prescriptionId:
-        widget
-            .prescriptionId!,
-        medicineName:
-        _medicineController
-            .text
-            .trim(),
-        foodTiming:
-        _foodTiming,
-        dosage:
-        _dosageController
-            .text
-            .trim(),
-        time:
-        _selectedTime!,
-        notes:
-        _notesController
-            .text
-            .trim(),
-        startDate:
-        _startDate,
-        endDate:
-        _endDate,
-      );
-    }
+    try {
+      final memberId = widget.memberId ??
+          context.read<MemberProvider>().activeMemberId;
+      if (memberId == null) {
+        _showError('No profile selected');
+        return;
+      }
 
-    if (mounted) {
-      Navigator.pop(context);
+      if (_isEditing) {
+        await PrescriptionFirestoreService.updatePrescription(
+          memberId: memberId,
+          prescriptionId: widget.prescriptionId!,
+          name: _nameCtrl.text.trim(),
+          hospitalName: _hospitalCtrl.text.trim(),
+          diagnosis: _diagnosisCtrl.text.trim(),
+          visitDate: _visitDate,
+          newImageFile: _imageFile,
+          removeImage: _removeExistingImage,
+        );
+        if (mounted) Navigator.pop(context);
+      } else {
+        // Create prescription envelope, then navigate to detail screen to add medicines
+        final prescriptionId =
+            await PrescriptionFirestoreService.addPrescription(
+          memberId: memberId,
+          name: _nameCtrl.text.trim(),
+          hospitalName: _hospitalCtrl.text.trim(),
+          diagnosis: _diagnosisCtrl.text.trim(),
+          visitDate: _visitDate,
+          imageFile: _imageFile,
+        );
+
+        if (mounted) {
+          // Replace with detail screen so user can add medicines immediately
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PrescriptionDetailScreen(
+                prescription: PrescriptionModel(
+                  id: prescriptionId,
+                  name: _nameCtrl.text.trim(),
+                  hospitalName: _hospitalCtrl.text.trim(),
+                  diagnosis: _diagnosisCtrl.text.trim(),
+                  visitDate: _visitDate,
+                  medicineCount: 0,
+                  createdAt: DateTime.now(),
+                ),
+                memberId: memberId,
+              ),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      _showError('Failed to save: $e');
+    } finally {
+      if (mounted) setState(() => _isSaving = false);
     }
+  }
+
+  void _showError(String msg) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(msg), backgroundColor: Colors.redAccent));
   }
 
   @override
-  Widget build(
-      BuildContext context) {
+  Widget build(BuildContext context) {
+    final bg = Theme.of(context).scaffoldBackgroundColor;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final cardBg = Theme.of(context).cardColor;
+
     return Scaffold(
-      backgroundColor:
-      const Color(0xFFF1F4FA),
+      backgroundColor: bg,
       appBar: AppBar(
         elevation: 0,
-        backgroundColor:
-        const Color(0xFFF1F4FA),
-        foregroundColor:
-        Colors.black,
-        title: const Text(
-          'Add Prescription',
-          style: TextStyle(
-              fontWeight:
-              FontWeight.w600),
+        backgroundColor: bg,
+        foregroundColor: isDark ? Colors.white : Colors.black,
+        title: Text(
+          _isEditing ? 'Edit Prescription' : 'New Prescription',
+          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
-      body:
-      SingleChildScrollView(
-        padding:
-        const EdgeInsets.all(20),
-        child: Column(
-          children: [
-            _inputField(
-              controller:
-              _medicineController,
-              label:
-              'Medicine Name',
-            ),
-            const SizedBox(
-                height: 12),
-            _isScanning
-                ? const CircularProgressIndicator()
-                : TextButton.icon(
-              onPressed:
-              _scanPrescription,
-              icon: const Icon(
-                  Icons.camera_alt),
-              label: const Text(
-                  "Scan Prescription"),
-            ),
-            const SizedBox(
-                height: 16),
-            _foodSelector(),
-            const SizedBox(
-                height: 16),
-            _inputField(
-              controller:
-              _dosageController,
-              label:
-              'Dosage (Optional)',
-            ),
-            const SizedBox(
-                height: 16),
-            _timePicker(),
-            const SizedBox(
-                height: 16),
-            _datePicker(
-              label:
-              'Start Date (Optional)',
-              value:
-              _startDate,
-              onTap:
-              _pickStartDate,
-            ),
-            const SizedBox(
-                height: 16),
-            _datePicker(
-              label:
-              'End Date (Optional)',
-              value:
-              _endDate,
-              onTap:
-              _pickEndDate,
-            ),
-            const SizedBox(
-                height: 16),
-            _inputField(
-              controller:
-              _notesController,
-              label:
-              'Notes (Optional)',
-              maxLines: 3,
-            ),
-            const SizedBox(
-                height: 24),
-            _saveButton(),
-          ],
-        ),
-      ),
-    );
-  }
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Image section
+              _imageSection(isDark, cardBg),
+              const SizedBox(height: 20),
 
-  Widget _inputField({
-    required TextEditingController
-    controller,
-    required String label,
-    int maxLines = 1,
-  }) {
-    return Container(
-      padding:
-      const EdgeInsets.symmetric(
-          horizontal: 20),
-      decoration:
-      BoxDecoration(
-        color: Colors.white,
-        borderRadius:
-        BorderRadius.circular(26),
-      ),
-      child: TextField(
-        controller:
-        controller,
-        maxLines:
-        maxLines,
-        decoration:
-        InputDecoration(
-          labelText:
-          label,
-          border:
-          InputBorder.none,
-        ),
-      ),
-    );
-  }
+              // Prescription name
+              _card(cardBg,
+                  child: TextFormField(
+                    controller: _nameCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Prescription Name *',
+                      hintText: 'e.g. Diabetic Follow-up',
+                      border: InputBorder.none,
+                    ),
+                    validator: (v) =>
+                        v == null || v.trim().isEmpty ? 'Required' : null,
+                  )),
+              const SizedBox(height: 12),
 
-  Widget _foodSelector() {
-    return DropdownButtonFormField<
-        String>(
-      value: _foodTiming,
-      items: const [
-        DropdownMenuItem(
-          value:
-          "Before Food",
-          child: Text(
-              "Before Food"),
-        ),
-        DropdownMenuItem(
-          value:
-          "After Food",
-          child:
-          Text("After Food"),
-        ),
-      ],
-      onChanged:
-          (value) {
-        setState(() {
-          _foodTiming =
-          value!;
-        });
-      },
-      decoration:
-      const InputDecoration(
-        border:
-        OutlineInputBorder(
-            borderRadius:
-            BorderRadius.all(
-                Radius.circular(
-                    26))),
-      ),
-    );
-  }
+              // Hospital name
+              _card(cardBg,
+                  child: TextFormField(
+                    controller: _hospitalCtrl,
+                    decoration: const InputDecoration(
+                      labelText: 'Hospital / Clinic Name',
+                      hintText: 'e.g. City Hospital',
+                      border: InputBorder.none,
+                    ),
+                  )),
+              const SizedBox(height: 12),
 
-  Widget _timePicker() {
-    return GestureDetector(
-      onTap: _pickTime,
-      child: Container(
-        padding:
-        const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 18),
-        decoration:
-        BoxDecoration(
-          color: Colors.white,
-          borderRadius:
-          BorderRadius.circular(26),
-        ),
-        child: Row(
-          mainAxisAlignment:
-          MainAxisAlignment
-              .spaceBetween,
-          children: [
-            Text(
-              _selectedTime == null
-                  ? "Select Time"
-                  : TimeOfDay
-                  .fromDateTime(
-                  _selectedTime!)
-                  .format(context),
-            ),
-            const Icon(
-                Icons.access_time),
-          ],
-        ),
-      ),
-    );
-  }
+              // Diagnosis
+              _card(cardBg,
+                  child: TextFormField(
+                    controller: _diagnosisCtrl,
+                    maxLines: 2,
+                    decoration: const InputDecoration(
+                      labelText: 'Diagnosis / Reason',
+                      hintText: 'e.g. Type 2 Diabetes',
+                      border: InputBorder.none,
+                    ),
+                  )),
+              const SizedBox(height: 12),
 
-  Widget _datePicker({
-    required String label,
-    required DateTime? value,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding:
-        const EdgeInsets.symmetric(
-            horizontal: 20,
-            vertical: 18),
-        decoration:
-        BoxDecoration(
-          color: Colors.white,
-          borderRadius:
-          BorderRadius.circular(26),
-        ),
-        child: Row(
-          mainAxisAlignment:
-          MainAxisAlignment
-              .spaceBetween,
-          children: [
-            Text(value == null
-                ? label
-                : "${value.day}/${value.month}/${value.year}"),
-            const Icon(
-                Icons.calendar_today),
-          ],
-        ),
-      ),
-    );
-  }
+              // Visit date
+              _card(cardBg,
+                  child: ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading:
+                        const Icon(Icons.calendar_today, color: Colors.green),
+                    title: const Text('Visit Date'),
+                    subtitle: Text(
+                        DateFormat('dd MMM yyyy').format(_visitDate),
+                        style: const TextStyle(fontWeight: FontWeight.w500)),
+                    onTap: () async {
+                      final picked = await showDatePicker(
+                        context: context,
+                        initialDate: _visitDate,
+                        firstDate: DateTime(2000),
+                        lastDate: DateTime.now(),
+                      );
+                      if (picked != null) setState(() => _visitDate = picked);
+                    },
+                  )),
+              const SizedBox(height: 28),
 
-  Widget _saveButton() {
-    return Container(
-      width:
-      double.infinity,
-      height: 52,
-      decoration:
-      BoxDecoration(
-        color: Colors.green,
-        borderRadius:
-        BorderRadius.circular(26),
-      ),
-      child: TextButton(
-        onPressed: _save,
-        child: const Text(
-          'Save Prescription',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 16,
-            fontWeight:
-            FontWeight.w600,
+              // Save button
+              SizedBox(
+                width: double.infinity,
+                height: 52,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.green,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(26)),
+                    elevation: 0,
+                  ),
+                  onPressed: _isSaving ? null : _save,
+                  child: _isSaving
+                      ? const SizedBox(
+                          height: 22,
+                          width: 22,
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: Colors.white))
+                      : Text(
+                          _isEditing
+                              ? 'Save Changes'
+                              : 'Create & Add Medicines',
+                          style: const TextStyle(
+                              fontSize: 16, fontWeight: FontWeight.w600),
+                        ),
+                ),
+              ),
+            ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _imageSection(bool isDark, Color cardBg) {
+    final existingUrl = widget.existingData?.imageUrl;
+    final hasImage = _imageFile != null ||
+        (existingUrl != null && !_removeExistingImage);
+
+    return GestureDetector(
+      onTap: () => _showImagePicker(),
+      child: Container(
+        height: 160,
+        width: double.infinity,
+        decoration: BoxDecoration(
+          color: cardBg,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+              color: Colors.green.withValues(alpha: 0.3), width: 1.5),
+        ),
+        child: hasImage
+            ? Stack(fit: StackFit.expand, children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(17),
+                  child: _imageFile != null
+                      ? Image.file(_imageFile!, fit: BoxFit.cover)
+                      : Image.network(existingUrl!, fit: BoxFit.cover),
+                ),
+                Positioned(
+                  top: 8,
+                  right: 8,
+                  child: GestureDetector(
+                    onTap: () => setState(() {
+                      _imageFile = null;
+                      _removeExistingImage = true;
+                    }),
+                    child: Container(
+                      decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(20)),
+                      padding: const EdgeInsets.all(6),
+                      child: const Icon(Icons.close,
+                          color: Colors.white, size: 16),
+                    ),
+                  ),
+                ),
+              ])
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.add_photo_alternate_outlined,
+                      size: 40,
+                      color: isDark ? Colors.grey.shade400 : Colors.grey),
+                  const SizedBox(height: 8),
+                  Text('Add Prescription Image (Optional)',
+                      style: TextStyle(
+                          color: isDark
+                              ? Colors.grey.shade400
+                              : Colors.grey.shade600,
+                          fontSize: 13)),
+                ],
+              ),
+      ),
+    );
+  }
+
+  void _showImagePicker() {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
+      builder: (_) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.camera_alt_outlined),
+              title: const Text('Take Photo'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.camera);
+              },
+            ),
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: const Text('Pick from Gallery'),
+              onTap: () {
+                Navigator.pop(context);
+                _pickImage(ImageSource.gallery);
+              },
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _card(Color bg, {required Widget child}) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+              color: Colors.black.withValues(alpha: 0.04),
+              blurRadius: 8,
+              offset: const Offset(0, 3))
+        ],
+      ),
+      child: child,
     );
   }
 }

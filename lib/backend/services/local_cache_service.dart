@@ -14,7 +14,7 @@ class LocalCacheService {
 
     final today = DateTime.now();
     final dateId =
-        "${today.year}-${today.month}-${today.day}";
+        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
 
     final Map<String, dynamic> entry = {
       'prescriptionId': prescriptionId,

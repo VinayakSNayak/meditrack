@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import '../../backend/services/auth_service.dart';
+import '../../core/errors/app_exception.dart';
 
 class ForgotPasswordScreen extends StatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -11,6 +12,12 @@ class ForgotPasswordScreen extends StatefulWidget {
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final TextEditingController emailController = TextEditingController();
   bool isLoading = false;
+
+  @override
+  void dispose() {
+    emailController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -37,6 +44,7 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
             const Text(
               'Enter your email to receive a reset link',
               style: TextStyle(color: Colors.grey),
+              textAlign: TextAlign.center,
             ),
             const SizedBox(height: 32),
             _inputField(
@@ -56,16 +64,19 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
                 ),
                 onPressed: isLoading ? null : _resetPassword,
                 child: isLoading
-                    ? const CircularProgressIndicator(
-                  color: Colors.white,
-                )
+                    ? const SizedBox(
+                        width: 22,
+                        height: 22,
+                        child: CircularProgressIndicator(
+                            color: Colors.white, strokeWidth: 2.5))
                     : const Text(
-                  'Send Reset Link',
-                  style: TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                        'Send Reset Link',
+                        style: TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white,
+                        ),
+                      ),
               ),
             ),
           ],
@@ -75,31 +86,33 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   }
 
   Future<void> _resetPassword() async {
-    setState(() {
-      isLoading = true;
-    });
+    final email = emailController.text.trim();
+    if (email.isEmpty) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Please enter your email')));
+      return;
+    }
 
-    final result = await AuthService.resetPassword(
-      emailController.text.trim(),
-    );
+    setState(() => isLoading = true);
 
-    setState(() {
-      isLoading = false;
-    });
-
-    if (result && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Password reset email sent'),
-        ),
-      );
-    } else {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to send reset email'),
-        ),
-      );
+    try {
+      await AuthService.resetPassword(email);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Password reset email sent. Check your inbox.'),
+          backgroundColor: Colors.green,
+        ));
+        Navigator.pop(context);
+      }
+    } on AuthException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.redAccent,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
     }
   }
 
