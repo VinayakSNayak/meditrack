@@ -1,9 +1,11 @@
+import 'dart:developer' as dev;
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../models/prescription_model.dart';
 import '../../models/medicine_model.dart';
 import 'notification_service.dart';
+import 'reminder_service.dart';
 import 'storage_service.dart';
 
 /// Handles all Firestore + Storage operations for the Prescription module.
@@ -100,24 +102,32 @@ class PrescriptionFirestoreService {
     await _prescriptionsRef(memberId).doc(prescriptionId).update(updates);
   }
 
-  /// Delete prescription + all medicines + cancel all notifications.
+  /// Delete prescription + all medicines + cancel all their notifications.
   static Future<void> deletePrescription({
     required String memberId,
     required String prescriptionId,
   }) async {
-    // Cancel all medicine notifications first
     final medicines = await _medicinesRef(memberId, prescriptionId).get();
+
     for (final doc in medicines.docs) {
-      final ids = List<int>.from(
-          (doc.data()['notificationIds'] as List<dynamic>? ?? [])
-              .map((e) => e as int));
-      for (final id in ids) {
-        await NotificationService.cancelNotification(id);
+      final med = MedicineModel.fromMap(doc.id, doc.data());
+
+      if (med.times.isNotEmpty) {
+        // Deterministic cancel — works even if notificationIds is stale
+        await ReminderService.cancelMedicineReminders(
+          medicineId: med.id,
+          times: med.times,
+        );
+      } else {
+        // Legacy fallback
+        for (final id in med.notificationIds) {
+          await NotificationService.cancelNotification(id);
+        }
       }
+
       await doc.reference.delete();
     }
 
-    // Delete the prescription document itself
     await _prescriptionsRef(memberId).doc(prescriptionId).delete();
   }
 
@@ -134,7 +144,7 @@ class PrescriptionFirestoreService {
 
   // ========================= MEDICINE CRUD =========================
 
-  /// Add a medicine under a prescription and schedule its notification.
+  /// Add a medicine under a prescription and schedule notifications for ALL time slots.
   static Future<void> addMedicine({
     required String memberId,
     required String prescriptionId,
@@ -142,44 +152,100 @@ class PrescriptionFirestoreService {
     required String dosage,
     required String frequency,
     required String foodTiming,
-    required DateTime reminderTime,
+    required List<String> times,
     DateTime? startDate,
     DateTime? endDate,
     required String notes,
   }) async {
-    final docRef = _medicinesRef(memberId, prescriptionId).doc();
+    // ── DEBUG: confirm what times list arrived at the service layer ──
+    dev.log(
+      '[PrescriptionFirestoreService] addMedicine ▶\n'
+      '  medicine   = "$medicineName"\n'
+      '  frequency  = "$frequency"\n'
+      '  times      = $times  (count=${times.length})\n'
+      '  startDate  = $startDate\n'
+      '  endDate    = $endDate',
+      name: 'PrescriptionFirestoreService',
+    );
 
-    // Schedule daily notification
-    final payload = '$_uid|$memberId|$prescriptionId|${docRef.id}';
-    final notifId = await NotificationService.scheduleMedicineReminder(
+    final docRef = _medicinesRef(memberId, prescriptionId).doc();
+    final medicineId = docRef.id;
+
+    // Schedule one notification per time slot via ReminderService.
+    // Returns {timeSlot: notifId} map — empty if endDate already passed.
+    final notificationMap = await ReminderService.scheduleMedicineReminders(
+      memberId: memberId,
+      prescriptionId: prescriptionId,
+      medicineId: medicineId,
       medicineName: medicineName,
       foodTiming: foodTiming,
-      reminderTime: reminderTime,
-      payload: payload,
+      times: times,
       startDate: startDate,
       endDate: endDate,
     );
 
-    await docRef.set({
+    // First time slot as DateTime — stored as backward-compat reminderTime field.
+    final firstTime = _parseTimeString(times.isNotEmpty ? times.first : '08:00');
+
+    final docData = {
       'medicineName': medicineName,
       'dosage': dosage,
       'frequency': frequency,
       'foodTiming': foodTiming,
-      'reminderTime': Timestamp.fromDate(reminderTime),
+      // Primary source of truth for scheduling
+      'times': times,
+      // notificationMap: {timeSlot → notifId} — used for targeted cancellation
+      'notificationMap': notificationMap,
+      // Backward compat: readable by old code that only knows reminderTime
+      'reminderTime': Timestamp.fromDate(firstTime),
+      // Legacy compat: derived from notificationMap values
+      'notificationIds': notificationMap.values.toList(),
       'startDate': startDate != null ? Timestamp.fromDate(startDate) : null,
       'endDate': endDate != null ? Timestamp.fromDate(endDate) : null,
       'notes': notes,
-      'notificationIds': notifId != null ? [notifId] : [],
       'createdAt': FieldValue.serverTimestamp(),
-    });
+    };
 
-    // Increment medicine count on parent
+    // ── DEBUG: print the exact map being written to Firestore ──
+    dev.log(
+      '[PrescriptionFirestoreService] addMedicine — writing document:\n'
+      '  docId      = $medicineId\n'
+      '  times      = ${docData['times']}\n'
+      '  notifMap   = ${docData['notificationMap']}\n'
+      '  reminderTime (compat) = ${docData['reminderTime']}',
+      name: 'PrescriptionFirestoreService',
+    );
+
+    await docRef.set(docData);
+
+    // ── DEBUG: read back the document to verify Firestore contents ──
+    final saved = await docRef.get();
+    if (saved.exists) {
+      final savedTimes = saved.data()?['times'];
+      dev.log(
+        '[PrescriptionFirestoreService] addMedicine ◀ VERIFIED\n'
+        '  Firestore times field = $savedTimes\n'
+        '  times count = ${(savedTimes as List?)?.length ?? 0}',
+        name: 'PrescriptionFirestoreService',
+      );
+    } else {
+      dev.log(
+        '[PrescriptionFirestoreService] addMedicine ◀ WARNING: '
+        'document not found after set() — possible Firestore issue',
+        name: 'PrescriptionFirestoreService',
+      );
+    }
+
+    // Increment medicine count on parent prescription document
     await _prescriptionsRef(memberId).doc(prescriptionId).update({
       'medicineCount': FieldValue.increment(1),
     });
   }
 
-  /// Update medicine fields and reschedule notification.
+  /// Update medicine fields, cancel old notifications, reschedule all new time slots.
+  ///
+  /// [oldTimes] — time slots that were previously saved (used to cancel
+  ///   deterministic IDs). Falls back to [oldNotificationIds] for legacy docs.
   static Future<void> updateMedicine({
     required String memberId,
     required String prescriptionId,
@@ -188,36 +254,69 @@ class PrescriptionFirestoreService {
     required String dosage,
     required String frequency,
     required String foodTiming,
-    required DateTime reminderTime,
+    required List<String> times,
+    required List<String> oldTimes,
     DateTime? startDate,
     bool clearStartDate = false,
     DateTime? endDate,
     bool clearEndDate = false,
     required String notes,
-    required List<int> oldNotificationIds,
+    // Legacy param — only used if oldTimes is empty
+    List<int> oldNotificationIds = const [],
   }) async {
-    // Cancel old notifications
-    for (final id in oldNotificationIds) {
-      await NotificationService.cancelNotification(id);
-    }
-
-    // Schedule new notification
-    final payload = '$_uid|$memberId|$prescriptionId|$medicineId';
-    final notifId = await NotificationService.scheduleMedicineReminder(
-      medicineName: medicineName,
-      foodTiming: foodTiming,
-      reminderTime: reminderTime,
-      payload: payload,
-      startDate: clearStartDate ? null : startDate,
-      endDate: clearEndDate ? null : endDate,
+    // ── DEBUG: confirm what arrived at the service layer ──
+    dev.log(
+      '[PrescriptionFirestoreService] updateMedicine ▶\n'
+      '  medicine   = "$medicineName"\n'
+      '  medicineId = $medicineId\n'
+      '  frequency  = "$frequency"\n'
+      '  oldTimes   = $oldTimes  (count=${oldTimes.length})\n'
+      '  newTimes   = $times  (count=${times.length})\n'
+      '  startDate  = $startDate  clearStart=$clearStartDate\n'
+      '  endDate    = $endDate  clearEnd=$clearEndDate',
+      name: 'PrescriptionFirestoreService',
     );
 
-    await _medicinesRef(memberId, prescriptionId).doc(medicineId).update({
+    // ── 1. Cancel OLD notifications ─────────────────────────────
+    if (oldTimes.isNotEmpty) {
+      // Deterministic cancel using medicineId + old time slot
+      await ReminderService.cancelMedicineReminders(
+        medicineId: medicineId,
+        times: oldTimes,
+      );
+    } else {
+      // Legacy fallback: cancel by raw IDs stored in Firestore
+      for (final id in oldNotificationIds) {
+        await NotificationService.cancelNotification(id);
+      }
+    }
+
+    final effectiveStartDate = clearStartDate ? null : startDate;
+    final effectiveEndDate = clearEndDate ? null : endDate;
+
+    // ── 2. Schedule NEW notifications for ALL time slots ────────
+    final notificationMap = await ReminderService.scheduleMedicineReminders(
+      memberId: memberId,
+      prescriptionId: prescriptionId,
+      medicineId: medicineId,
+      medicineName: medicineName,
+      foodTiming: foodTiming,
+      times: times,
+      startDate: effectiveStartDate,
+      endDate: effectiveEndDate,
+    );
+
+    final firstTime = _parseTimeString(times.isNotEmpty ? times.first : '08:00');
+
+    final updateData = {
       'medicineName': medicineName,
       'dosage': dosage,
       'frequency': frequency,
       'foodTiming': foodTiming,
-      'reminderTime': Timestamp.fromDate(reminderTime),
+      'times': times,
+      'notificationMap': notificationMap,
+      'reminderTime': Timestamp.fromDate(firstTime),
+      'notificationIds': notificationMap.values.toList(),
       'startDate': clearStartDate
           ? null
           : (startDate != null ? Timestamp.fromDate(startDate) : null),
@@ -225,24 +324,68 @@ class PrescriptionFirestoreService {
           ? null
           : (endDate != null ? Timestamp.fromDate(endDate) : null),
       'notes': notes,
-      'notificationIds': notifId != null ? [notifId] : [],
       'updatedAt': FieldValue.serverTimestamp(),
-    });
+    };
+
+    // ── DEBUG: print the exact map being written to Firestore ──
+    dev.log(
+      '[PrescriptionFirestoreService] updateMedicine — writing update:\n'
+      '  times      = ${updateData['times']}\n'
+      '  notifMap   = ${updateData['notificationMap']}\n'
+      '  reminderTime (compat) = ${updateData['reminderTime']}',
+      name: 'PrescriptionFirestoreService',
+    );
+
+    // ── 3. Persist updated fields ────────────────────────────────
+    final docRef = _medicinesRef(memberId, prescriptionId).doc(medicineId);
+    await docRef.update(updateData);
+
+    // ── DEBUG: read back the document to verify Firestore contents ──
+    final saved = await docRef.get();
+    if (saved.exists) {
+      final savedTimes = saved.data()?['times'];
+      dev.log(
+        '[PrescriptionFirestoreService] updateMedicine ◀ VERIFIED\n'
+        '  Firestore times field = $savedTimes\n'
+        '  times count = ${(savedTimes as List?)?.length ?? 0}',
+        name: 'PrescriptionFirestoreService',
+      );
+    } else {
+      dev.log(
+        '[PrescriptionFirestoreService] updateMedicine ◀ WARNING: '
+        'document not found after update() — possible Firestore issue',
+        name: 'PrescriptionFirestoreService',
+      );
+    }
   }
 
-  /// Delete a medicine and cancel its notifications.
+  /// Delete a medicine and cancel all its scheduled notifications.
+  ///
+  /// [times] is the current times list from MedicineModel — used to
+  /// compute deterministic notification IDs for cancellation.
+  /// [notificationIds] is kept as a legacy fallback for old documents
+  /// that don't have a times list.
   static Future<void> deleteMedicine({
     required String memberId,
     required String prescriptionId,
     required String medicineId,
-    required List<int> notificationIds,
+    List<String> times = const [],
+    // Legacy fallback
+    List<int> notificationIds = const [],
   }) async {
-    for (final id in notificationIds) {
-      await NotificationService.cancelNotification(id);
+    if (times.isNotEmpty) {
+      await ReminderService.cancelMedicineReminders(
+        medicineId: medicineId,
+        times: times,
+      );
+    } else {
+      for (final id in notificationIds) {
+        await NotificationService.cancelNotification(id);
+      }
     }
     await _medicinesRef(memberId, prescriptionId).doc(medicineId).delete();
 
-    // Decrement medicine count
+    // Decrement medicine count on parent
     await _prescriptionsRef(memberId).doc(prescriptionId).update({
       'medicineCount': FieldValue.increment(-1),
     });
@@ -327,6 +470,15 @@ class PrescriptionFirestoreService {
   }
 
   // ========================= STORAGE =========================
+
+  /// Parse "HH:mm" string → DateTime on today's date.
+  static DateTime _parseTimeString(String hhmm) {
+    final parts = hhmm.split(':');
+    final hour = int.tryParse(parts[0]) ?? 8;
+    final minute = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+    final now = DateTime.now();
+    return DateTime(now.year, now.month, now.day, hour, minute);
+  }
 
   static Future<String> _uploadImage(File file, String prescriptionId) async {
     return StorageService.uploadPrescriptionImage(

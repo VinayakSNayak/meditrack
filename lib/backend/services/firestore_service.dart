@@ -2,7 +2,6 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../../core/errors/app_exception.dart';
-import 'notification_service.dart';
 
 class FirestoreService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instance;
@@ -160,13 +159,13 @@ class FirestoreService {
         _userDoc.collection('members').doc(memberId).snapshots());
   }
 
-  static Stream<DocumentSnapshot<Map<String, dynamic>>> getAccountOwner() {
+  static Stream<DocumentSnapshot<Map<String, dynamic>>?> getAccountOwner() {
     return _userDoc
         .collection('members')
         .where('isSelf', isEqualTo: true)
         .limit(1)
         .snapshots()
-        .map((query) => query.docs.first);
+        .map((query) => query.docs.isEmpty ? null : query.docs.first);
   }
 
   static Future<void> updateActiveMemberProfile({
@@ -218,7 +217,8 @@ class FirestoreService {
     });
   }
 
-  // BUG FIX: was using .add() — created duplicates instead of updating
+  // History fix: add a new document on every edit so all past values
+  // are preserved and visible in the history screen.
   static Future<void> updateBodyVitalMetric({
     required String docId,
     required String type,
@@ -229,12 +229,12 @@ class FirestoreService {
     final collection = await getMemberCollection('bodyVitals');
     if (collection == null) return;
 
-    await collection.doc(docId).update({
+    await collection.add({
       'type': type,
       'value': value,
       'unit': unit,
       'recordDate': Timestamp.fromDate(recordDate),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -242,6 +242,16 @@ class FirestoreService {
     final collection = await getMemberCollection('bodyVitals');
     if (collection == null) return;
     await collection.doc(docId).delete();
+  }
+
+  /// Deletes ALL history documents for a given vital type (used by view screen delete button).
+  static Future<void> deleteAllBodyVitalsByType(String type) async {
+    final collection = await getMemberCollection('bodyVitals');
+    if (collection == null) return;
+    final snap = await collection.where('type', isEqualTo: type).get();
+    for (final doc in snap.docs) {
+      await doc.reference.delete();
+    }
   }
 
   static Stream<QuerySnapshot<Map<String, dynamic>>>
@@ -272,7 +282,8 @@ class FirestoreService {
     });
   }
 
-  // BUG FIX: was using .add() — created duplicates instead of updating
+  // History fix: add a new document on every edit so all past values
+  // are preserved and visible in the history screen.
   static Future<void> updateBloodMetric({
     required String docId,
     required String type,
@@ -283,12 +294,12 @@ class FirestoreService {
     final collection = await getMemberCollection('bloodRecords');
     if (collection == null) return;
 
-    await collection.doc(docId).update({
+    await collection.add({
       'type': type,
       'value': value,
       'unit': unit,
       'recordDate': Timestamp.fromDate(recordDate),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -296,6 +307,16 @@ class FirestoreService {
     final collection = await getMemberCollection('bloodRecords');
     if (collection == null) return;
     await collection.doc(docId).delete();
+  }
+
+  /// Deletes ALL history documents for a given blood metric type.
+  static Future<void> deleteAllBloodMetricsByType(String type) async {
+    final collection = await getMemberCollection('bloodRecords');
+    if (collection == null) return;
+    final snap = await collection.where('type', isEqualTo: type).get();
+    for (final doc in snap.docs) {
+      await doc.reference.delete();
+    }
   }
 
   static Stream<QuerySnapshot<Map<String, dynamic>>> getBloodMetrics() {
@@ -387,7 +408,8 @@ class FirestoreService {
     });
   }
 
-  // BUG FIX: was using .add() — created duplicates instead of updating
+  // History fix: add a new document on every edit so all past values
+  // are preserved and visible in the history screen.
   static Future<void> updateOtherRecord({
     required String docId,
     required String recordName,
@@ -397,11 +419,11 @@ class FirestoreService {
     final collection = await getMemberCollection('otherRecords');
     if (collection == null) return;
 
-    await collection.doc(docId).update({
+    await collection.add({
       'recordName': recordName,
       'measurement': measurement,
       'recordDate': Timestamp.fromDate(recordDate),
-      'updatedAt': FieldValue.serverTimestamp(),
+      'createdAt': FieldValue.serverTimestamp(),
     });
   }
 
@@ -409,6 +431,16 @@ class FirestoreService {
     final collection = await getMemberCollection('otherRecords');
     if (collection == null) return;
     await collection.doc(docId).delete();
+  }
+
+  /// Deletes ALL history documents for a given other record name.
+  static Future<void> deleteAllOtherRecordsByName(String recordName) async {
+    final collection = await getMemberCollection('otherRecords');
+    if (collection == null) return;
+    final snap = await collection.where('recordName', isEqualTo: recordName).get();
+    for (final doc in snap.docs) {
+      await doc.reference.delete();
+    }
   }
 
   static Stream<QuerySnapshot<Map<String, dynamic>>> getOtherRecords() {
@@ -481,28 +513,29 @@ class FirestoreService {
 
   static Future<Map<String, int>> getWeeklyAdherenceCounts() async {
     try {
-      final collection = await getMemberCollection('prescriptions');
-      if (collection == null) return {};
-
-      final prescriptionsSnap = await collection.get();
-      final Map<String, int> takenPerDay = {};
+      final memberId = await _getActiveMemberId();
+      if (memberId == null) return {};
 
       final last7 = List.generate(7, (i) {
         final d = DateTime.now().subtract(Duration(days: 6 - i));
         return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
       });
 
-      for (final dateId in last7) {
-        takenPerDay[dateId] = 0;
-      }
+      final Map<String, int> takenPerDay = {for (final d in last7) d: 0};
 
-      for (final doc in prescriptionsSnap.docs) {
-        for (final dateId in last7) {
-          final statusDoc =
-              await doc.reference.collection('dailyStatus').doc(dateId).get();
-          if (statusDoc.exists && statusDoc.data()?['status'] == 'taken') {
-            takenPerDay[dateId] = (takenPerDay[dateId] ?? 0) + 1;
-          }
+      // Query new adherence_logs collection written by ReminderService.markTaken
+      final logsSnap = await _userDoc
+          .collection('members')
+          .doc(memberId)
+          .collection('adherence_logs')
+          .where('scheduledDate', whereIn: last7)
+          .where('status', isEqualTo: 'taken')
+          .get();
+
+      for (final doc in logsSnap.docs) {
+        final dateId = doc.data()['scheduledDate'] as String?;
+        if (dateId != null && takenPerDay.containsKey(dateId)) {
+          takenPerDay[dateId] = (takenPerDay[dateId] ?? 0) + 1;
         }
       }
 
@@ -514,32 +547,30 @@ class FirestoreService {
 
   static Future<double> getWeeklyAdherenceRate() async {
     try {
-      final collection = await getMemberCollection('prescriptions');
-      if (collection == null) return 0.0;
-
-      final prescriptionsSnap = await collection.get();
-      if (prescriptionsSnap.docs.isEmpty) return 0.0;
-
-      int total = 0;
-      int taken = 0;
+      final memberId = await _getActiveMemberId();
+      if (memberId == null) return 0.0;
 
       final last7 = List.generate(7, (i) {
         final d = DateTime.now().subtract(Duration(days: 6 - i));
         return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
       });
 
-      for (final doc in prescriptionsSnap.docs) {
-        for (final dateId in last7) {
-          total++;
-          final statusDoc =
-              await doc.reference.collection('dailyStatus').doc(dateId).get();
-          if (statusDoc.exists && statusDoc.data()?['status'] == 'taken') {
-            taken++;
-          }
-        }
-      }
+      final logsRef = _userDoc
+          .collection('members')
+          .doc(memberId)
+          .collection('adherence_logs');
 
-      return total == 0 ? 0.0 : taken / total;
+      // Total scheduled = taken + skipped in last 7 days
+      final allSnap = await logsRef
+          .where('scheduledDate', whereIn: last7)
+          .where('status', whereIn: ['taken', 'skipped'])
+          .get();
+
+      if (allSnap.docs.isEmpty) return 0.0;
+
+      final takenCount =
+          allSnap.docs.where((d) => d.data()['status'] == 'taken').length;
+      return takenCount / allSnap.docs.length;
     } catch (_) {
       return 0.0;
     }
@@ -548,28 +579,29 @@ class FirestoreService {
   /// Monthly adherence — last 30 days count of taken doses per day
   static Future<Map<String, int>> getMonthlyAdherenceCounts() async {
     try {
-      final collection = await getMemberCollection('prescriptions');
-      if (collection == null) return {};
-
-      final prescriptionsSnap = await collection.get();
-      final Map<String, int> takenPerDay = {};
+      final memberId = await _getActiveMemberId();
+      if (memberId == null) return {};
 
       final last30 = List.generate(30, (i) {
         final d = DateTime.now().subtract(Duration(days: 29 - i));
         return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
       });
 
-      for (final dateId in last30) {
-        takenPerDay[dateId] = 0;
-      }
+      final Map<String, int> takenPerDay = {for (final d in last30) d: 0};
 
-      for (final doc in prescriptionsSnap.docs) {
-        for (final dateId in last30) {
-          final statusDoc =
-              await doc.reference.collection('dailyStatus').doc(dateId).get();
-          if (statusDoc.exists && statusDoc.data()?['status'] == 'taken') {
-            takenPerDay[dateId] = (takenPerDay[dateId] ?? 0) + 1;
-          }
+      // Firestore 'whereIn' supports up to 30 elements — fits exactly
+      final logsSnap = await _userDoc
+          .collection('members')
+          .doc(memberId)
+          .collection('adherence_logs')
+          .where('scheduledDate', whereIn: last30)
+          .where('status', isEqualTo: 'taken')
+          .get();
+
+      for (final doc in logsSnap.docs) {
+        final dateId = doc.data()['scheduledDate'] as String?;
+        if (dateId != null && takenPerDay.containsKey(dateId)) {
+          takenPerDay[dateId] = (takenPerDay[dateId] ?? 0) + 1;
         }
       }
 
@@ -582,32 +614,29 @@ class FirestoreService {
   /// Monthly adherence rate — 0.0 to 1.0
   static Future<double> getMonthlyAdherenceRate() async {
     try {
-      final collection = await getMemberCollection('prescriptions');
-      if (collection == null) return 0.0;
-
-      final prescriptionsSnap = await collection.get();
-      if (prescriptionsSnap.docs.isEmpty) return 0.0;
-
-      int total = 0;
-      int taken = 0;
+      final memberId = await _getActiveMemberId();
+      if (memberId == null) return 0.0;
 
       final last30 = List.generate(30, (i) {
         final d = DateTime.now().subtract(Duration(days: 29 - i));
         return '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
       });
 
-      for (final doc in prescriptionsSnap.docs) {
-        for (final dateId in last30) {
-          total++;
-          final statusDoc =
-              await doc.reference.collection('dailyStatus').doc(dateId).get();
-          if (statusDoc.exists && statusDoc.data()?['status'] == 'taken') {
-            taken++;
-          }
-        }
-      }
+      final logsRef = _userDoc
+          .collection('members')
+          .doc(memberId)
+          .collection('adherence_logs');
 
-      return total == 0 ? 0.0 : taken / total;
+      final allSnap = await logsRef
+          .where('scheduledDate', whereIn: last30)
+          .where('status', whereIn: ['taken', 'skipped'])
+          .get();
+
+      if (allSnap.docs.isEmpty) return 0.0;
+
+      final takenCount =
+          allSnap.docs.where((d) => d.data()['status'] == 'taken').length;
+      return takenCount / allSnap.docs.length;
     } catch (_) {
       return 0.0;
     }

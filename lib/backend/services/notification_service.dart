@@ -1,18 +1,16 @@
-import 'package:cloud_firestore/cloud_firestore.dart';
+import 'dart:developer' as dev;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:timezone/timezone.dart' as tz;
 import 'package:timezone/data/latest.dart' as tz;
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'firestore_service.dart';
-import 'local_cache_service.dart';
-import 'sync_service.dart';
+import 'reminder_service.dart';
 
 class NotificationService {
   static final FlutterLocalNotificationsPlugin _notifications =
       FlutterLocalNotificationsPlugin();
 
-  static const String _channelId = 'meditrack_reminders';
+  static const String _channelId   = 'meditrack_reminders';
   static const String _channelName = 'Medicine Reminders';
 
   // ========================= INIT =========================
@@ -25,10 +23,10 @@ class NotificationService {
       android: AndroidInitializationSettings('@mipmap/ic_launcher'),
     );
 
+    // No background handler needed — no action buttons on notifications.
     await _notifications.initialize(
       initSettings,
-      onDidReceiveNotificationResponse: _onNotificationTap,
-      onDidReceiveBackgroundNotificationResponse: _onNotificationTapBackground,
+      onDidReceiveNotificationResponse: _onForegroundTap,
     );
 
     final androidPlugin = _notifications
@@ -45,53 +43,23 @@ class NotificationService {
         importance: Importance.max,
         playSound: true,
         enableVibration: true,
+        showBadge: true,
       ),
     );
   }
 
-  // ========================= RESPONSE HANDLERS =========================
+  // ========================= FOREGROUND TAP HANDLER =========================
 
-  static Future<void> _onNotificationTap(NotificationResponse response) async {
-    await _handleAction(response.payload, response.actionId);
-  }
-
-  /// Background isolate handler — must initialize Firebase before using Firestore
-  @pragma('vm:entry-point')
-  static Future<void> _onNotificationTapBackground(
-      NotificationResponse response) async {
-    // Ensure Firebase is initialized in the background isolate
-    try {
-      if (Firebase.apps.isEmpty) {
-        await Firebase.initializeApp();
-      }
-    } catch (_) {}
-    await _handleAction(response.payload, response.actionId);
-  }
-
-  /// Payload format: "uid|memberId|prescriptionId|medicineId"
-  static Future<void> _handleAction(
-      String? payload, String? actionId) async {
-    if (payload == null || payload.isEmpty) return;
-
-    if (actionId == 'snooze') {
-      final snoozeTime = DateTime.now().add(const Duration(minutes: 10));
-      final snoozeId = DateTime.now().millisecondsSinceEpoch.remainder(100000);
-      await _scheduleOneTime(
-        id: snoozeId,
-        title: 'Medicine Reminder (Snoozed)',
-        body: 'Time to take your medicine',
-        scheduledTime: snoozeTime,
-        payload: payload,
-      );
-    }
-    // No taken/missed handling in notification — managed from in-app UI only
+  // Tapping the notification opens the app — snooze is inside Reminders screen.
+  static Future<void> _onForegroundTap(NotificationResponse response) async {
+    dev.log(
+      '[NotificationService] notification tapped  payload="${response.payload}"',
+      name: 'NotificationService',
+    );
   }
 
   // ========================= MEDICINE REMINDER =========================
 
-  /// Schedule a daily reminder for a medicine.
-  /// Respects startDate (don't schedule if today < startDate).
-  /// Returns notificationId or null if not scheduled (expired/not started).
   static Future<int?> scheduleMedicineReminder({
     required String medicineName,
     required String foodTiming,
@@ -99,17 +67,21 @@ class NotificationService {
     required String payload,
     DateTime? startDate,
     DateTime? endDate,
+    int? notificationId,
   }) async {
-    final today = DateTime.now();
+    final today    = DateTime.now();
     final todayDay = DateTime(today.year, today.month, today.day);
 
-    // Do not schedule if already past endDate
     if (endDate != null) {
       final end = DateTime(endDate.year, endDate.month, endDate.day);
       if (todayDay.isAfter(end)) return null;
     }
 
+    final id = notificationId ??
+        DateTime.now().millisecondsSinceEpoch.remainder(100000);
+
     return await _scheduleDailyAt(
+      id: id,
       title: medicineName,
       body: foodTiming.isNotEmpty ? foodTiming : 'Time to take your medicine',
       time: reminderTime,
@@ -117,9 +89,21 @@ class NotificationService {
     );
   }
 
+  /// Used by ReminderService.snooze() to schedule a +10 min one-shot.
+  static Future<void> scheduleOneTimeReminder({
+    required int id,
+    required String title,
+    required String body,
+    required DateTime scheduledTime,
+    required String payload,
+  }) async {
+    await _scheduleOneTime(
+        id: id, title: title, body: body,
+        scheduledTime: scheduledTime, payload: payload);
+  }
+
   // ========================= LEGACY COMPAT =========================
 
-  /// Keep for backward compatibility — wraps scheduleDailyAt.
   static Future<int> scheduleDailyNotification({
     required String title,
     required String body,
@@ -127,11 +111,7 @@ class NotificationService {
     required String payload,
   }) async {
     return await _scheduleDailyAt(
-      title: title,
-      body: body,
-      time: time,
-      payload: payload,
-    );
+        title: title, body: body, time: time, payload: payload);
   }
 
   // ========================= INTERNAL SCHEDULING =========================
@@ -141,51 +121,52 @@ class NotificationService {
     required String body,
     required DateTime time,
     required String payload,
+    int? id,
   }) async {
-    final id = DateTime.now().millisecondsSinceEpoch.remainder(100000);
+    final notifId = id ??
+        DateTime.now().millisecondsSinceEpoch.remainder(100000);
 
     final now = tz.TZDateTime.now(tz.local);
     var scheduled = tz.TZDateTime(
       tz.local, now.year, now.month, now.day, time.hour, time.minute,
     );
-
     if (scheduled.isBefore(now)) {
       scheduled = scheduled.add(const Duration(days: 1));
     }
 
+    dev.log('[NotificationService] schedule  id=$notifId  '
+        'title="$title"  at=$scheduled', name: 'NotificationService');
+
+    // Each notification gets its own tag (string form of the ID) so that
+    // Android treats them as completely independent notifications and plays
+    // sound + shows heads-up for every one, even when multiple arrive close
+    // together on the same channel.
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
-        _channelId,
-        _channelName,
+        _channelId, _channelName,
         channelDescription: 'Medicine reminder',
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
         enableVibration: true,
-        actions: const [
-          AndroidNotificationAction(
-            'snooze',
-            '⏰ Snooze 10 min',
-            showsUserInterface: false,
-            cancelNotification: true,
-          ),
-        ],
+        tag: 'meditrack_$notifId',
       ),
     );
 
     await _notifications.zonedSchedule(
-      id, title, body, scheduled, details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      notifId, title, body, scheduled, details,
+      androidScheduleMode: AndroidScheduleMode.alarmClock,
       matchDateTimeComponents: DateTimeComponents.time,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       payload: payload,
     );
 
-    return id;
+    dev.log('[NotificationService] schedule ✓  id=$notifId  at=$scheduled',
+        name: 'NotificationService');
+    return notifId;
   }
 
-  /// One-time notification for snooze.
   static Future<void> _scheduleOneTime({
     required int id,
     required String title,
@@ -195,102 +176,52 @@ class NotificationService {
   }) async {
     final tzScheduled = tz.TZDateTime.from(scheduledTime, tz.local);
 
+    dev.log('[NotificationService] scheduleOneTime  id=$id  '
+        'title="$title"  at=$tzScheduled', name: 'NotificationService');
+
+    // Unique tag ensures this one-time (snooze) notification is treated
+    // independently — no silent grouping, sound always plays.
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
-        _channelId,
-        _channelName,
+        _channelId, _channelName,
         importance: Importance.max,
         priority: Priority.high,
         playSound: true,
-        actions: const [
-          AndroidNotificationAction(
-            'snooze', '⏰ Snooze 10 min',
-            showsUserInterface: false, cancelNotification: true),
-        ],
+        enableVibration: true,
+        tag: 'meditrack_$id',
       ),
     );
 
     await _notifications.zonedSchedule(
       id, title, body, tzScheduled, details,
-      androidScheduleMode: AndroidScheduleMode.exactAllowWhileIdle,
+      androidScheduleMode: AndroidScheduleMode.alarmClock,
       uiLocalNotificationDateInterpretation:
           UILocalNotificationDateInterpretation.absoluteTime,
       payload: payload,
     );
+
+    dev.log('[NotificationService] scheduleOneTime ✓  id=$id',
+        name: 'NotificationService');
   }
 
   static Future<void> cancelNotification(int id) async {
-    await _notifications.cancel(id);
+    // Must pass the same tag used when scheduling, otherwise Android
+    // won't find and cancel the notification.
+    await _notifications.cancel(id, tag: 'meditrack_$id');
   }
 
   static Future<void> cancelAll() async {
     await _notifications.cancelAll();
   }
 
-  /// Reschedule all active medicines after device reboot.
   static Future<void> rescheduleAll() async {
     try {
       if (Firebase.apps.isEmpty) await Firebase.initializeApp();
-
-      final uid = FirestoreService.uid;
+      final uid      = FirestoreService.uid;
       final memberId = await FirestoreService.getActiveMemberIdOnce();
       if (memberId == null) return;
-
-      // Use PrescriptionFirestoreService to get all medicines
-      final allMedicines = await _getAllMedicinesForMember(uid, memberId);
-
-      for (final entry in allMedicines) {
-        final med = entry['medicine'];
-        final prescriptionId = entry['prescriptionId'] as String;
-        final medId = med['id'] as String;
-        final reminderTime = (med['reminderTime'] as Timestamp).toDate();
-        final endDate = (med['endDate'] as Timestamp?)?.toDate();
-        final medicineName = med['medicineName'] as String? ?? '';
-        final foodTiming = med['foodTiming'] as String? ?? '';
-
-        final today = DateTime.now();
-        if (endDate != null &&
-            DateTime(today.year, today.month, today.day)
-                .isAfter(DateTime(endDate.year, endDate.month, endDate.day))) {
-          continue;
-        }
-
-        final payload = '$uid|$memberId|$prescriptionId|$medId';
-        await scheduleMedicineReminder(
-          medicineName: medicineName,
-          foodTiming: foodTiming,
-          reminderTime: reminderTime,
-          payload: payload,
-          endDate: endDate,
-        );
-      }
-    } catch (_) {
-      // Best-effort — silent fail on reboot
-    }
-  }
-
-  static Future<List<Map<String, dynamic>>> _getAllMedicinesForMember(
-      String uid, String memberId) async {
-    final firestore = FirebaseFirestore.instance;
-    final prescSnap = await firestore
-        .collection('users')
-        .doc(uid)
-        .collection('members')
-        .doc(memberId)
-        .collection('prescriptions')
-        .get();
-
-    final result = <Map<String, dynamic>>[];
-    for (final p in prescSnap.docs) {
-      final medsSnap = await p.reference.collection('medicines').get();
-      for (final m in medsSnap.docs) {
-        result.add({
-          'prescriptionId': p.id,
-          'medicine': {'id': m.id, ...m.data()},
-        });
-      }
-    }
-    return result;
+      await ReminderService.rescheduleAll(uid: uid, memberId: memberId);
+    } catch (_) {}
   }
 }
 

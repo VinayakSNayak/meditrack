@@ -265,17 +265,13 @@ class _AddOtherRecordScreenState
         Navigator.pop(context);
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-          context)
-          .showSnackBar(
-        SnackBar(
-            content:
-            Text("Error: $e")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
     }
 
-    setState(() {
-      isSaving = false;
-    });
+    if (mounted) setState(() => isSaving = false);
   }
 }

@@ -303,7 +303,16 @@ class _MedicineCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final cardBg = Theme.of(context).cardColor;
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final timeStr = DateFormat('hh:mm a').format(medicine.reminderTime);
+
+    // Build time string from ALL time slots, not just times.first
+    final timesStr = medicine.times.isNotEmpty
+        ? medicine.times.map((t) {
+            final parts = t.split(':');
+            final h = int.tryParse(parts[0]) ?? 8;
+            final m = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+            return DateFormat('hh:mm a').format(DateTime(2000, 1, 1, h, m));
+          }).join(' · ')
+        : DateFormat('hh:mm a').format(medicine.reminderTime);
 
     final isActive = medicine.isActiveToday(DateTime.now());
     final statusColor = isActive ? Colors.green : Colors.grey;
@@ -346,7 +355,7 @@ class _MedicineCard extends StatelessWidget {
                     if (medicine.dosage.isNotEmpty) medicine.dosage,
                     if (medicine.frequency.isNotEmpty) medicine.frequency,
                     medicine.foodTiming,
-                    timeStr,
+                    timesStr,
                   ].join(' • '),
                   style: TextStyle(
                       fontSize: 12,
@@ -432,6 +441,7 @@ class _MedicineCard extends StatelessWidget {
         memberId: memberId,
         prescriptionId: prescriptionId,
         medicineId: medicine.id,
+        times: medicine.times,
         notificationIds: medicine.notificationIds,
       );
     }
@@ -485,23 +495,33 @@ class _OcrPreviewSheetState extends State<_OcrPreviewSheet> {
     if (_selected.isEmpty) return;
     setState(() => _saving = true);
 
-    for (final i in _selected) {
-      final name = _nameControllers[i].text.trim();
-      if (name.isEmpty) continue;
-      await PrescriptionFirestoreService.addMedicine(
-        memberId: widget.memberId,
-        prescriptionId: widget.prescriptionId,
-        medicineName: name,
-        dosage: _dosageControllers[i].text.trim(),
-        frequency: widget.results[i].frequency,
-        foodTiming: widget.results[i].foodTiming,
-        reminderTime: DateTime.now()
-            .copyWith(hour: 8, minute: 0, second: 0, millisecond: 0),
-        notes: '',
-      );
+    try {
+      for (final i in _selected) {
+        final name = _nameControllers[i].text.trim();
+        if (name.isEmpty) continue;
+        await PrescriptionFirestoreService.addMedicine(
+          memberId: widget.memberId,
+          prescriptionId: widget.prescriptionId,
+          medicineName: name,
+          dosage: _dosageControllers[i].text.trim(),
+          frequency: widget.results[i].frequency,
+          foodTiming: widget.results[i].foodTiming,
+          times: const ['08:00'],
+          notes: '',
+        );
+      }
+      if (mounted) Navigator.pop(context);
+    } catch (e) {
+      if (mounted) {
+        setState(() => _saving = false);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save: $e'),
+            backgroundColor: Colors.redAccent,
+          ),
+        );
+      }
     }
-
-    if (mounted) Navigator.pop(context);
   }
 
   @override

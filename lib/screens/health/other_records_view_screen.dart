@@ -35,11 +35,22 @@ class OtherRecordsViewScreen extends StatelessWidget {
 
           final docs = snapshot.data!.docs;
 
+          // Show only the latest entry per recordName (docs are already
+          // sorted by recordDate descending from Firestore).
+          final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> latestByName = {};
+          for (final doc in docs) {
+            final name = doc.data()['recordName'] as String? ?? '';
+            if (!latestByName.containsKey(name)) {
+              latestByName[name] = doc;
+            }
+          }
+          final uniqueDocs = latestByName.values.toList();
+
           return ListView.builder(
             padding: const EdgeInsets.all(20),
-            itemCount: docs.length,
+            itemCount: uniqueDocs.length,
             itemBuilder: (context, index) {
-              final doc = docs[index];
+              final doc = uniqueDocs[index];
               final data = doc.data();
 
               return _recordCard(
@@ -142,7 +153,7 @@ class OtherRecordsViewScreen extends StatelessWidget {
                     Colors.red.shade400,
                   ),
                   onPressed: () =>
-                      _confirmDelete(context, docId),
+                      _confirmDeleteByName(context, data['recordName'] ?? ''),
                   child: const Text("Delete"),
                 ),
               ),
@@ -153,33 +164,35 @@ class OtherRecordsViewScreen extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(
-      BuildContext context, String docId) {
+  void _confirmDelete(BuildContext context, String docId) {
+    // Get the recordName from the currently visible data via docId is not
+    // available here, so we look it up from the stream — instead we accept
+    // recordName directly.
+    _confirmDeleteByName(context, docId);
+  }
+
+  void _confirmDeleteByName(BuildContext context, String recordName) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(16),
         ),
         title: const Text("Delete Record?"),
         content: const Text(
-            "This will permanently remove this record."),
+            "This will permanently remove this record and all its history."),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(context),
+            onPressed: () => Navigator.pop(context),
             child: const Text("Cancel"),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-              Colors.red.shade400,
+              backgroundColor: Colors.red.shade400,
             ),
             onPressed: () async {
               Navigator.pop(context);
-              await FirestoreService
-                  .deleteOtherRecord(docId);
+              await FirestoreService.deleteAllOtherRecordsByName(recordName);
             },
             child: const Text("Delete"),
           ),

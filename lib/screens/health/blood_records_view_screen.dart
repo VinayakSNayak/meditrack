@@ -189,7 +189,7 @@ class BloodRecordsViewScreen extends StatelessWidget {
                             onPressed: () =>
                                 _confirmDelete(
                                     context,
-                                    doc.id),
+                                    data['type']),
                             child:
                             const Text("Delete"),
                           ),
@@ -206,33 +206,28 @@ class BloodRecordsViewScreen extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(
-      BuildContext context, String docId) {
+  void _confirmDelete(BuildContext context, String type) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(16),
         ),
         title: const Text("Delete Record?"),
         content: const Text(
-            "This will permanently remove this record."),
+            "This will permanently remove this record and all its history."),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(context),
+            onPressed: () => Navigator.pop(context),
             child: const Text("Cancel"),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-              Colors.red.shade400,
+              backgroundColor: Colors.red.shade400,
             ),
             onPressed: () async {
               Navigator.pop(context);
-              await FirestoreService
-                  .deleteBloodMetric(docId);
+              await FirestoreService.deleteAllBloodMetricsByType(type);
             },
             child: const Text("Delete"),
           ),

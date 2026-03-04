@@ -28,7 +28,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
     if (!mounted) return;
 
-    // Sync any offline-cached medicine statuses
+    // Sync any offline-cached medicine statusesa
     SyncService.syncPendingStatuses();
 
     // Use one-time stream to get the current auth state reliably
@@ -41,8 +41,9 @@ class _SplashScreenState extends State<SplashScreen> {
       if (mounted) {
         context.read<MemberProvider>().init();
       }
-      // Reschedule all notifications in case device rebooted
-      NotificationService.rescheduleAll();
+      // Reschedule all notifications after login — AWAITED so alarms are
+      // registered with alarmClock mode before the user opens the app.
+      await NotificationService.rescheduleAll();
 
       Navigator.pushReplacement(
         context,

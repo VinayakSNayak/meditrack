@@ -27,8 +27,10 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
 
   String _frequency = '';
   String _foodTiming = 'After Food';
-  DateTime _reminderTime = DateTime.now().copyWith(
-      hour: 8, minute: 0, second: 0, millisecond: 0);
+
+  /// List of "HH:mm" strings — one per daily reminder slot.
+  List<String> _times = ['08:00'];
+
   DateTime? _startDate;
   DateTime? _endDate;
   bool _isSaving = false;
@@ -44,6 +46,32 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
     'After Food', 'Before Food', 'With Food',
   ];
 
+  /// Default time slots for each count of doses per day.
+  static List<String> _defaultTimesForCount(int count) {
+    switch (count) {
+      case 2:
+        return ['08:00', '21:00'];
+      case 3:
+        return ['08:00', '14:00', '21:00'];
+      default:
+        return ['08:00'];
+    }
+  }
+
+  /// Resize _times list when frequency changes:
+  /// - grow  → pad with sensible defaults
+  /// - shrink → truncate
+  void _initTimesForFrequency(String freq) {
+    final needed = MedicineModel.timesCountForFrequency(freq);
+    final defaults = _defaultTimesForCount(needed);
+    if (_times.length == needed) return; // already correct size
+    final updated = List<String>.generate(needed, (i) {
+      if (i < _times.length) return _times[i]; // keep existing
+      return defaults[i];                      // fill with default
+    });
+    setState(() => _times = updated);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -54,9 +82,13 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
       _notesCtrl.text = m.notes;
       _frequency = m.frequency;
       _foodTiming = m.foodTiming;
-      _reminderTime = m.reminderTime;
+      // Use existing times list (already handles backward compat via reminderTime)
+      _times = List<String>.from(m.times.isNotEmpty ? m.times : ['08:00']);
       _startDate = m.startDate;
       _endDate = m.endDate;
+    } else {
+      // Initialise default time slots for blank form
+      _initTimesForFrequency(_frequency);
     }
   }
 
@@ -82,7 +114,8 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
           dosage: _dosageCtrl.text.trim(),
           frequency: _frequency,
           foodTiming: _foodTiming,
-          reminderTime: _reminderTime,
+          times: _times,
+          oldTimes: List<String>.from(widget.existingMedicine!.times),
           startDate: _startDate,
           endDate: _endDate,
           notes: _notesCtrl.text.trim(),
@@ -96,7 +129,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
           dosage: _dosageCtrl.text.trim(),
           frequency: _frequency,
           foodTiming: _foodTiming,
-          reminderTime: _reminderTime,
+          times: _times,
           startDate: _startDate,
           endDate: _endDate,
           notes: _notesCtrl.text.trim(),
@@ -178,7 +211,22 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
                             value: f,
                             child: Text(f.isEmpty ? 'Select frequency' : f)))
                         .toList(),
-                    onChanged: (v) => setState(() => _frequency = v ?? ''),
+                    onChanged: (v) {
+                      final freq = v ?? '';
+                      final needed = MedicineModel.timesCountForFrequency(freq);
+                      final defaults = _defaultTimesForCount(needed);
+                      // Single setState so _frequency and _times are ALWAYS
+                      // in sync — prevents any frame with mismatched slot count.
+                      setState(() {
+                        _frequency = freq;
+                        if (_times.length != needed) {
+                          _times = List<String>.generate(needed, (i) {
+                            if (i < _times.length) return _times[i];
+                            return defaults[i];
+                          });
+                        }
+                      });
+                    },
                   )),
               const SizedBox(height: 12),
 
@@ -198,33 +246,8 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
                   )),
               const SizedBox(height: 12),
 
-              // Reminder time
-              _field(cardBg,
-                  child: ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: const Icon(Icons.alarm_outlined,
-                        color: Colors.green),
-                    title: const Text('Reminder Time'),
-                    subtitle: Text(
-                        DateFormat('hh:mm a').format(_reminderTime),
-                        style: const TextStyle(
-                            fontWeight: FontWeight.w500,
-                            color: Colors.green)),
-                    onTap: () async {
-                      final picked = await showTimePicker(
-                        context: context,
-                        initialTime:
-                            TimeOfDay.fromDateTime(_reminderTime),
-                      );
-                      if (picked != null && mounted) {
-                        setState(() {
-                          final now = DateTime.now();
-                          _reminderTime = DateTime(now.year, now.month,
-                              now.day, picked.hour, picked.minute);
-                        });
-                      }
-                    },
-                  )),
+              // Dynamic reminder time pickers (one per dose)
+              ..._buildTimePickers(cardBg),
               const SizedBox(height: 12),
 
               // Start date (nullable)
@@ -311,6 +334,51 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
     );
   }
 
+  /// Builds one time-picker tile for each slot in [_times].
+  List<Widget> _buildTimePickers(Color cardBg) {
+    final labels = _times.length == 1
+        ? ['Reminder Time']
+        : List<String>.generate(
+            _times.length, (i) => 'Dose ${i + 1} Time');
+
+    final tiles = <Widget>[];
+    for (int i = 0; i < _times.length; i++) {
+      final timeStr = _times[i];
+      final parts = timeStr.split(':');
+      final hour = int.tryParse(parts[0]) ?? 8;
+      final minute = int.tryParse(parts.length > 1 ? parts[1] : '0') ?? 0;
+      final displayTime = DateFormat('hh:mm a')
+          .format(DateTime(2000, 1, 1, hour, minute));
+
+      tiles.add(
+        _field(cardBg,
+            child: ListTile(
+              contentPadding: EdgeInsets.zero,
+              leading: const Icon(Icons.alarm_outlined, color: Colors.green),
+              title: Text(labels[i]),
+              subtitle: Text(displayTime,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w500, color: Colors.green)),
+              onTap: () async {
+                final picked = await showTimePicker(
+                  context: context,
+                  initialTime: TimeOfDay(hour: hour, minute: minute),
+                );
+                if (picked != null && mounted) {
+                  final hh = picked.hour.toString().padLeft(2, '0');
+                  final mm = picked.minute.toString().padLeft(2, '0');
+                  final updated = List<String>.from(_times);
+                  updated[i] = '$hh:$mm';
+                  setState(() => _times = updated);
+                }
+              },
+            )),
+      );
+      tiles.add(const SizedBox(height: 12));
+    }
+    return tiles;
+  }
+
   Widget _field(Color bg, {required Widget child}) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
@@ -363,5 +431,4 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
     );
   }
 }
-
 

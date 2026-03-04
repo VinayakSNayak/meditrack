@@ -31,12 +31,21 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadData() async {
     setState(() => _isLoading = true);
+    // Capture memberId synchronously before any await — safe context access.
+    final memberId = context.read<MemberProvider>().activeMemberId;
     try {
-      final memberId =
-          context.read<MemberProvider>().activeMemberId;
+      final Map<String, int> counts;
+      final double rate;
 
-      final counts = await FirestoreService.getWeeklyAdherenceCounts();
-      final rate = await FirestoreService.getWeeklyAdherenceRate();
+      // Respect the selected filter
+      if (_selectedFilter == 'Monthly') {
+        counts = await FirestoreService.getMonthlyAdherenceCounts();
+        rate = await FirestoreService.getMonthlyAdherenceRate();
+      } else {
+        counts = await FirestoreService.getWeeklyAdherenceCounts();
+        rate = await FirestoreService.getWeeklyAdherenceRate();
+      }
+
       final vitals = await FirestoreService.getRecentVitalsForContext();
 
       List<Map<String, dynamic>> todayMeds = [];
@@ -48,13 +57,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
       if (mounted) {
         setState(() {
           _adherenceCounts = counts;
-          _adherenceRate = rate;
+          // getWeekly/MonthlyAdherenceRate returns 0.0–1.0; convert to 0.0–100.0
+          // so the card display, colour thresholds, and progress indicator are correct.
+          _adherenceRate = rate * 100;
           _vitals = vitals;
           _todayMedicines = todayMeds;
           _isLoading = false;
         });
       }
-    } catch (_) {
+    } catch (e) {
+      // Log error so it's visible in debug console, don't crash silently
+      debugPrint('[DashboardScreen] _loadData error: $e');
       if (mounted) setState(() => _isLoading = false);
     }
   }
@@ -150,7 +163,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Weekly Adherence Rate',
+                Text('$_selectedFilter Adherence Rate',
                     style: TextStyle(color: Colors.white70, fontSize: 13)),
                 const SizedBox(height: 8),
                 Text('${rate.toStringAsFixed(1)}%',

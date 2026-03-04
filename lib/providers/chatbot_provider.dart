@@ -1,15 +1,15 @@
+import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
-import 'package:google_generative_ai/google_generative_ai.dart';
-import '../backend/services/gemini_service.dart';
+import '../backend/services/chatbot_api_service.dart';
 import '../backend/services/firestore_service.dart';
 import '../backend/services/prescription_firestore_service.dart';
 import '../models/chat_message_model.dart';
-import '../core/errors/app_exception.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 
 class ChatbotProvider extends ChangeNotifier {
   final List<ChatMessageModel> _messages = [];
+  final ChatbotApiService _api = ChatbotApiService();
   bool _isLoading = false;
   String? _errorMessage;
 
@@ -23,16 +23,19 @@ class ChatbotProvider extends ChangeNotifier {
 
   void _addWelcomeMessage() {
     _messages.add(ChatMessageModel.bot(
-      'Hello! I\'m MediTrack Assist 👋\n\nI can answer questions about your medications, health records, and general wellness.\n\n⚠️ I provide general health information only. Always consult a qualified doctor for medical advice.',
+      'Hello! I\'m MediTrack Assist 👋\n\n'
+      'I can answer questions about your medications, health records, and general wellness.\n\n'
+      '⚠️ I provide general health information only. '
+      'Always consult a qualified doctor for medical advice.',
     ));
   }
 
   Future<void> sendMessage(String userText) async {
     if (userText.trim().isEmpty) return;
+    if (_isLoading) return;
 
     final trimmed = userText.trim();
 
-    // Add user message + loading indicator
     _messages.add(ChatMessageModel.user(trimmed));
     _messages.add(ChatMessageModel.loading());
     _isLoading = true;
@@ -40,43 +43,32 @@ class ChatbotProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      // RAG: Build patient context from Firestore
+      // Build patient context from Firestore (RAG)
       final patientContext = await _buildPatientContext();
 
-      // Build chat history as proper Content objects for Gemini multi-turn
-      // Skip the welcome message (index 0) and the current user msg + loading
-      final history = <Content>[];
-      final conversationMessages = _messages
-          .where((m) => !m.isLoading)
-          .toList();
-
-      // Build pairs from conversation (skip welcome at 0, skip latest user at end)
-      for (int i = 1; i < conversationMessages.length - 1; i++) {
-        final m = conversationMessages[i];
-        if (m.text.isEmpty) continue;
-        history.add(Content(
-          m.isUser ? 'user' : 'model',
-          [TextPart(m.text)],
-        ));
-      }
-
-      final response = await GeminiService.sendMessage(
-        userMessage: trimmed,
-        patientContext: patientContext,
-        chatHistory: history,
+      dev.log(
+        '[ChatbotProvider] contextLength=${patientContext.length} chars',
+        name: 'ChatbotProvider',
       );
 
-      // Remove loading bubble, add bot response
+      // Prepend patient context to the user message
+      final fullMessage = patientContext.isNotEmpty
+          ? '[PATIENT CONTEXT — use this to personalise your answer]\n'
+              '$patientContext\n'
+              '[END CONTEXT]\n\n'
+              '[USER QUESTION]\n$trimmed'
+          : trimmed;
+
+      final response = await _api.sendMessage(fullMessage);
+
       _messages.removeWhere((m) => m.isLoading);
       _messages.add(ChatMessageModel.bot(response));
-    } on AppException catch (e) {
-      _messages.removeWhere((m) => m.isLoading);
-      _messages.add(ChatMessageModel.bot('⚠️ ${e.message}'));
-      _errorMessage = e.message;
     } catch (e) {
+      dev.log('[ChatbotProvider] error: $e', name: 'ChatbotProvider');
       _messages.removeWhere((m) => m.isLoading);
-      _messages.add(ChatMessageModel.bot(
-          'Sorry, I couldn\'t connect. Please check your internet connection and try again.'));
+      final errorText = e.toString().replaceFirst('Exception: ', '');
+      _messages.add(ChatMessageModel.bot('⚠️ $errorText'));
+      _errorMessage = errorText;
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -85,10 +77,8 @@ class ChatbotProvider extends ChangeNotifier {
 
   Future<String> _buildPatientContext() async {
     try {
-      // Get active memberId
       final memberId = await FirestoreService.getActiveMemberIdOnce();
 
-      // Fetch active medicines from new nested structure
       final List<Map<String, dynamic>> prescriptions = memberId != null
           ? await PrescriptionFirestoreService
               .getActivePrescriptionsForContext(memberId)
@@ -99,18 +89,28 @@ class ChatbotProvider extends ChangeNotifier {
 
       final buffer = StringBuffer();
 
+      buffer.writeln(
+          'TODAY: ${DateFormat('EEEE, dd MMMM yyyy').format(DateTime.now())}');
+      buffer.writeln();
+
       if (prescriptions.isNotEmpty) {
         buffer.writeln('CURRENT MEDICATIONS:');
         for (final p in prescriptions) {
-          final name = p['medicineName'] ?? '';
-          final dosage = p['dosage'] ?? '';
-          final timing = p['foodTiming'] ?? '';
-          final timeStamp = p['reminderTime'] as Timestamp?;
-          final timeStr = timeStamp != null
-              ? DateFormat('hh:mm a').format(timeStamp.toDate())
-              : '';
+          final name = (p['medicineName'] as String? ?? '').trim();
+          if (name.isEmpty) continue;
+          final dosage = p['dosage'] as String? ?? '';
+          final timing = p['foodTiming'] as String? ?? '';
+          final ts = p['reminderTime'];
+          String timeStr = '';
+          if (ts is Timestamp) {
+            timeStr = DateFormat('hh:mm a').format(ts.toDate());
+          }
           buffer.writeln(
-              '- $name ${dosage.isNotEmpty ? "($dosage)" : ""}, $timing at $timeStr');
+            '- $name'
+            '${dosage.isNotEmpty ? " ($dosage)" : ""}'
+            '${timing.isNotEmpty ? ", $timing" : ""}'
+            '${timeStr.isNotEmpty ? " at $timeStr" : ""}',
+          );
         }
         buffer.writeln();
       }
@@ -118,11 +118,15 @@ class ChatbotProvider extends ChangeNotifier {
       if (conditions.isNotEmpty) {
         buffer.writeln('EXISTING CONDITIONS:');
         for (final c in conditions) {
-          final name = c['conditionName'] ?? '';
-          final status = c['status'] ?? '';
-          final medication = c['medication'] ?? '';
+          final name = c['conditionName'] as String? ?? '';
+          if (name.isEmpty) continue;
+          final status = c['status'] as String? ?? '';
+          final medication = c['medication'] as String? ?? '';
           buffer.writeln(
-              '- $name (Status: $status)${medication.isNotEmpty ? ", Medication: $medication" : ""}');
+            '- $name'
+            '${status.isNotEmpty ? " (Status: $status)" : ""}'
+            '${medication.isNotEmpty ? ", Medication: $medication" : ""}',
+          );
         }
         buffer.writeln();
       }
@@ -130,19 +134,26 @@ class ChatbotProvider extends ChangeNotifier {
       if (vitals.isNotEmpty) {
         buffer.writeln('RECENT VITALS:');
         for (final v in vitals) {
-          final type = v['type'] ?? '';
+          final type = v['type'] as String? ?? '';
+          if (type.isEmpty) continue;
           final value = v['value']?.toString() ?? '';
-          final unit = v['unit'] ?? '';
-          final dateStamp = v['recordDate'] as Timestamp?;
-          final dateStr = dateStamp != null
-              ? DateFormat('dd MMM yyyy').format(dateStamp.toDate())
-              : '';
-          buffer.writeln('- $type: $value $unit ($dateStr)');
+          final unit = v['unit'] as String? ?? '';
+          final dateStamp = v['recordDate'];
+          String dateStr = '';
+          if (dateStamp is Timestamp) {
+            dateStr = DateFormat('dd MMM yyyy').format(dateStamp.toDate());
+          }
+          buffer.writeln(
+            '- $type: $value $unit'
+            '${dateStr.isNotEmpty ? " ($dateStr)" : ""}',
+          );
         }
       }
 
-      return buffer.toString();
-    } catch (_) {
+      return buffer.toString().trim();
+    } catch (e) {
+      dev.log('[ChatbotProvider] _buildPatientContext failed: $e',
+          name: 'ChatbotProvider');
       return '';
     }
   }

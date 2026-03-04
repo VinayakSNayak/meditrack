@@ -177,7 +177,7 @@ class BodyVitalsViewScreen extends StatelessWidget {
                         borderRadius: BorderRadius.circular(14)),
                     padding: const EdgeInsets.symmetric(vertical: 12),
                   ),
-                  onPressed: () => _confirmDelete(context, docId),
+                  onPressed: () => _confirmDelete(context, type),
                   child: const Text('Delete'),
                 ),
               ),
@@ -188,33 +188,28 @@ class BodyVitalsViewScreen extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(
-      BuildContext context, String docId) {
+  void _confirmDelete(BuildContext context, String type) {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
         shape: RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(16),
         ),
         title: const Text("Delete Record?"),
         content: const Text(
-            "This will permanently remove this record."),
+            "This will permanently remove this record and all its history."),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(context),
+            onPressed: () => Navigator.pop(context),
             child: const Text("Cancel"),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor:
-              Colors.red.shade400,
+              backgroundColor: Colors.red.shade400,
             ),
             onPressed: () async {
               Navigator.pop(context);
-              await FirestoreService
-                  .deleteBodyVital(docId);
+              await FirestoreService.deleteAllBodyVitalsByType(type);
             },
             child: const Text("Delete"),
           ),

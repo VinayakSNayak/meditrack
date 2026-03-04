@@ -228,7 +228,7 @@ class _AddConditionScreenState
 
   Widget _statusDropdown() {
     return DropdownButtonFormField<String>(
-      value: selectedStatus,
+      initialValue: selectedStatus,
       items: const [
         DropdownMenuItem(
             value: "Active",
@@ -360,16 +360,13 @@ class _AddConditionScreenState
         Navigator.pop(context);
       }
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        SnackBar(
-            content:
-            Text("Error: $e")),
-      );
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text("Error: $e")),
+        );
+      }
     }
 
-    setState(() {
-      isSaving = false;
-    });
+    if (mounted) setState(() => isSaving = false);
   }
 }

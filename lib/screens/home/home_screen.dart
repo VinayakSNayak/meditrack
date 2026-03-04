@@ -121,13 +121,12 @@ class _HomeContent extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // Greeting
-          StreamBuilder(
+          StreamBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
             stream: FirestoreService.getAccountOwner(),
             builder: (context, snapshot) {
               String name = 'User';
               if (snapshot.hasData && snapshot.data != null) {
-                final data = (snapshot.data! as dynamic).data();
-                name = (data as Map<String, dynamic>?)?['name'] as String? ?? 'User';
+                name = snapshot.data!.data()?['name'] as String? ?? 'User';
               }
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -164,6 +163,9 @@ class _HomeContent extends StatelessWidget {
                           style: TextStyle(color: Colors.grey));
                     }
                     return FutureBuilder<List<Map<String, dynamic>>>(
+                      // ValueKey forces a fresh Future when memberId changes,
+                      // preventing stale data from the previous member.
+                      key: ValueKey(memberId),
                       future: PrescriptionFirestoreService
                           .getActiveMedicinesForToday(memberId),
                       builder: (context, snapshot) {
