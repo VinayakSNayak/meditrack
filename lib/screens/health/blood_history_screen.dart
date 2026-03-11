@@ -25,123 +25,98 @@ class BloodHistoryScreen extends StatelessWidget {
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirestoreService.getBloodMetrics(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+      // Outer: resolve active member id
+      body: StreamBuilder<String?>(
+        stream: FirestoreService.getActiveMemberId(),
+        builder: (context, memberSnap) {
+          if (!memberSnap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          final docs = snapshot.data!.docs;
-
-          // Filter by selected metric type
-          final filteredDocs = docs
-              .where((doc) =>
-          doc.data().containsKey('type') &&
-              doc['type'] == metricType)
-              .toList();
-
-          if (filteredDocs.isEmpty) {
-            return const Center(
-              child: Text("No history available"),
-            );
+          final memberId = memberSnap.data;
+          if (memberId == null) {
+            return const Center(child: Text("No member selected"));
           }
 
-          // 🔥 Sort using recordTime if available
-          filteredDocs.sort((a, b) {
-            final aTime =
-            (a.data()['recordTime'] ??
-                a.data()['recordDate']) as Timestamp;
-            final bTime =
-            (b.data()['recordTime'] ??
-                b.data()['recordDate']) as Timestamp;
+          // Inner: direct Firestore query for this member
+          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirestoreService.getBloodMetricsForMember(memberId),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-            return bTime.toDate().compareTo(aTime.toDate());
-          });
+              // Filter by the selected metric type
+              final filteredDocs = snapshot.data!.docs
+                  .where((doc) =>
+                      doc.data().containsKey('type') &&
+                      doc['type'] == metricType)
+                  .toList();
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: filteredDocs.length,
-            itemBuilder: (context, index) {
-              final data = filteredDocs[index].data();
+              // Sort by createdAt descending — new edits always appear
+              // first regardless of what recordDate was chosen.
+              filteredDocs.sort((a, b) {
+                final aTs = a.data()['createdAt'] as Timestamp?;
+                final bTs = b.data()['createdAt'] as Timestamp?;
+                // Fall back to recordDate for old documents without createdAt
+                final aDate = aTs?.toDate() ??
+                    (a['recordDate'] as Timestamp).toDate();
+                final bDate = bTs?.toDate() ??
+                    (b['recordDate'] as Timestamp).toDate();
+                return bDate.compareTo(aDate);
+              });
 
-              final recordDate =
-              (data['recordDate'] as Timestamp?)?.toDate();
+              if (filteredDocs.isEmpty) {
+                return const Center(
+                  child: Text("No history available"),
+                );
+              }
 
-              final recordTime =
-              (data['recordTime'] ??
-                  data['recordDate']) as Timestamp?;
-
-              final timeDate = recordTime?.toDate();
-
-              final isEdited = data['isEdited'] == true;
-
-              return Container(
-                margin: const EdgeInsets.only(bottom: 18),
+              return ListView.builder(
                 padding: const EdgeInsets.all(20),
-                decoration: BoxDecoration(
-                  color: Theme.of(context).cardColor,
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.06),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
-                    )
-                  ],
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
+                itemCount: filteredDocs.length,
+                itemBuilder: (context, index) {
+                  final data = filteredDocs[index].data();
+                  final recordDate =
+                      (data['recordDate'] as Timestamp?)?.toDate();
 
-                    /// DATE + TIME + EDITED TAG
-                    Row(
-                      mainAxisAlignment:
-                      MainAxisAlignment.spaceBetween,
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 18),
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).cardColor,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.06),
+                          blurRadius: 12,
+                          offset: const Offset(0, 4),
+                        )
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          recordDate != null && timeDate != null
-                              ? "${recordDate.day}/${recordDate.month}/${recordDate.year}  •  ${_formatTime(timeDate)}"
+                          recordDate != null
+                              ? "${recordDate.day}/${recordDate.month}/${recordDate.year}  •  ${_formatTime(recordDate)}"
                               : "No date",
                           style: const TextStyle(
                             fontSize: 13,
                             color: Colors.black54,
                           ),
                         ),
-
-                        if (isEdited)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 10, vertical: 4),
-                            decoration: BoxDecoration(
-                              color: Colors.orange.shade50,
-                              borderRadius:
-                              BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              "Edited",
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: Colors.orange.shade700,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                        const SizedBox(height: 12),
+                        Text(
+                          "${data['value']} ${data['unit']}",
+                          style: const TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w600,
                           ),
+                        ),
                       ],
                     ),
-
-                    const SizedBox(height: 12),
-
-                    /// VALUE
-                    Text(
-                      "${data['value']} ${data['unit']}",
-                      style: const TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
-                ),
+                  );
+                },
               );
             },
           );
@@ -151,14 +126,10 @@ class BloodHistoryScreen extends StatelessWidget {
   }
 
   String _formatTime(DateTime date) {
-    int hour = date.hour;
-    final minute =
-    date.minute.toString().padLeft(2, '0');
-    final period = hour >= 12 ? "PM" : "AM";
-
-    hour = hour % 12;
+    int hour = date.hour % 12;
     if (hour == 0) hour = 12;
-
+    final minute = date.minute.toString().padLeft(2, '0');
+    final period = date.hour >= 12 ? "PM" : "AM";
     return "$hour:$minute $period";
   }
 }

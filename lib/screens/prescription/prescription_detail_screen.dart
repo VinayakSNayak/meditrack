@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../backend/services/prescription_firestore_service.dart';
@@ -5,8 +7,9 @@ import '../../backend/services/prescription_ocr_service.dart';
 import '../../models/prescription_model.dart';
 import '../../models/medicine_model.dart';
 import 'add_medicine_screen.dart'; // add/edit medicine form
+import 'add_prescription_screen.dart'; // edit prescription
 
-class PrescriptionDetailScreen extends StatelessWidget {
+class PrescriptionDetailScreen extends StatefulWidget {
   final PrescriptionModel prescription;
   final String memberId;
 
@@ -15,6 +18,79 @@ class PrescriptionDetailScreen extends StatelessWidget {
     required this.prescription,
     required this.memberId,
   });
+
+  @override
+  State<PrescriptionDetailScreen> createState() =>
+      _PrescriptionDetailScreenState();
+}
+
+class _PrescriptionDetailScreenState extends State<PrescriptionDetailScreen> {
+  late PrescriptionModel _prescription;
+  StreamSubscription<dynamic>? _prescriptionSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _prescription = widget.prescription;
+    // FIX (PROBLEM 2): Subscribe to the Firestore document so _prescription
+    // (including imageUrl) is always up-to-date without needing a manual
+    // refresh. This ensures the image appears immediately after saving,
+    // even when the initial model passed from the list did not yet contain
+    // the imageUrl (e.g. server timestamp hadn't resolved or upload was
+    // still in progress when the list snapshot was taken).
+    _prescriptionSub = PrescriptionFirestoreService
+        .rawPrescriptionsRef(widget.memberId)
+        .doc(widget.prescription.id)
+        .snapshots()
+        .listen((snap) {
+      if (snap.exists && mounted) {
+        setState(() {
+          _prescription =
+              PrescriptionModel.fromMap(snap.id, snap.data()!);
+        });
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _prescriptionSub?.cancel();
+    super.dispose();
+  }
+
+  /// Opens the edit screen with the latest Firestore data so imageUrl is
+  /// always present. After editing, the stream subscription automatically
+  /// updates _prescription — no manual post-edit refresh needed.
+  Future<void> _openEditScreen() async {
+    // Use the already-up-to-date _prescription (kept fresh by the stream).
+    // Fall back to a one-time get() if _prescription.imageUrl is somehow null
+    // but the Firestore doc has one (race condition on first open).
+    PrescriptionModel latest = _prescription;
+    try {
+      final snap = await PrescriptionFirestoreService.rawPrescriptionsRef(
+              widget.memberId)
+          .doc(_prescription.id)
+          .get();
+      if (snap.exists) {
+        latest = PrescriptionModel.fromMap(snap.id, snap.data()!);
+      }
+    } catch (_) {
+      // Use local _prescription as fallback
+    }
+
+    if (!mounted) return;
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AddPrescriptionScreen(
+          prescriptionId: latest.id,
+          existingData: latest,
+          memberId: widget.memberId,
+        ),
+      ),
+    );
+    // Stream subscription handles the refresh automatically after edit.
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,28 +105,21 @@ class PrescriptionDetailScreen extends StatelessWidget {
         backgroundColor: bg,
         foregroundColor: isDark ? Colors.white : Colors.black,
         title: Text(
-          prescription.name.isNotEmpty ? prescription.name : 'Prescription',
+          _prescription.name.isNotEmpty ? _prescription.name : 'Prescription',
           style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         actions: [
+          // Edit prescription button
+          IconButton(
+            icon: const Icon(Icons.edit_outlined),
+            tooltip: 'Edit Prescription',
+            onPressed: _openEditScreen,
+          ),
           // Scan button for OCR
           IconButton(
             icon: const Icon(Icons.document_scanner_outlined),
             tooltip: 'Scan & Add Medicine',
             onPressed: () => _scanAndAdd(context),
-          ),
-          IconButton(
-            icon: const Icon(Icons.add),
-            tooltip: 'Add Medicine',
-            onPressed: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => AddMedicineScreen(
-                  memberId: memberId,
-                  prescriptionId: prescription.id,
-                ),
-              ),
-            ),
           ),
         ],
       ),
@@ -63,7 +132,7 @@ class PrescriptionDetailScreen extends StatelessWidget {
           Expanded(
             child: StreamBuilder<List<MedicineModel>>(
               stream: PrescriptionFirestoreService.medicinesStream(
-                  memberId, prescription.id),
+                  widget.memberId, _prescription.id),
               builder: (context, snapshot) {
                 if (snapshot.connectionState == ConnectionState.waiting) {
                   return const Center(child: CircularProgressIndicator());
@@ -77,8 +146,8 @@ class PrescriptionDetailScreen extends StatelessWidget {
                   separatorBuilder: (_, __) => const SizedBox(height: 12),
                   itemBuilder: (context, i) => _MedicineCard(
                     medicine: snapshot.data![i],
-                    memberId: memberId,
-                    prescriptionId: prescription.id,
+                    memberId: widget.memberId,
+                    prescriptionId: _prescription.id,
                   ),
                 );
               },
@@ -92,8 +161,8 @@ class PrescriptionDetailScreen extends StatelessWidget {
           context,
           MaterialPageRoute(
             builder: (_) => AddMedicineScreen(
-              memberId: memberId,
-              prescriptionId: prescription.id,
+              memberId: widget.memberId,
+              prescriptionId: _prescription.id,
             ),
           ),
         ),
@@ -122,27 +191,27 @@ class PrescriptionDetailScreen extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          if (prescription.hospitalName.isNotEmpty)
+          if (_prescription.hospitalName.isNotEmpty)
             Row(children: [
               Icon(Icons.local_hospital_outlined,
                   size: 14,
                   color: isDark ? Colors.grey.shade400 : Colors.grey),
               const SizedBox(width: 6),
-              Text(prescription.hospitalName,
+              Text(_prescription.hospitalName,
                   style: TextStyle(
                       fontSize: 13,
                       color: isDark
                           ? Colors.grey.shade400
                           : Colors.grey.shade600)),
             ]),
-          if (prescription.diagnosis.isNotEmpty) ...[
+          if (_prescription.diagnosis.isNotEmpty) ...[
             const SizedBox(height: 4),
             Row(children: [
               Icon(Icons.medical_information_outlined,
                   size: 14,
                   color: isDark ? Colors.grey.shade400 : Colors.grey),
               const SizedBox(width: 6),
-              Text(prescription.diagnosis,
+              Text(_prescription.diagnosis,
                   style: TextStyle(
                       fontSize: 13,
                       color: isDark
@@ -157,7 +226,7 @@ class PrescriptionDetailScreen extends StatelessWidget {
                 color: isDark ? Colors.grey.shade400 : Colors.grey),
             const SizedBox(width: 6),
             Text(
-                'Visit: ${DateFormat('dd MMM yyyy').format(prescription.visitDate)}',
+                'Visit: ${DateFormat('dd MMM yyyy').format(_prescription.visitDate)}',
                 style: TextStyle(
                     fontSize: 13,
                     color: isDark
@@ -165,18 +234,63 @@ class PrescriptionDetailScreen extends StatelessWidget {
                         : Colors.grey.shade600)),
           ]),
           // Prescription image
-          if (prescription.imageUrl != null) ...[
+          if (_prescription.imageUrl != null &&
+              _prescription.imageUrl!.isNotEmpty) ...[
             const SizedBox(height: 10),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(12),
-              child: Image.network(
-                prescription.imageUrl!,
-                height: 120,
-                width: double.infinity,
-                fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => const SizedBox(),
-              ),
-            ),
+            Builder(builder: (context) {
+              dev.log(
+                '[PrescriptionDetailScreen] Displaying imageUrl: '
+                '${_prescription.imageUrl}',
+                name: 'PrescriptionDetailScreen',
+              );
+              return ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: Image.network(
+                  _prescription.imageUrl!,
+                  height: 120,
+                  width: double.infinity,
+                  fit: BoxFit.cover,
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return Container(
+                      height: 120,
+                      width: double.infinity,
+                      color: Colors.grey.shade200,
+                      child: const Center(
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    );
+                  },
+                  errorBuilder: (context, error, stackTrace) {
+                    dev.log(
+                      '[PrescriptionDetailScreen] Image.network ERROR: $error  '
+                      'url=${_prescription.imageUrl}',
+                      name: 'PrescriptionDetailScreen',
+                      error: error,
+                    );
+                    return Container(
+                      height: 60,
+                      width: double.infinity,
+                      decoration: BoxDecoration(
+                        color: Colors.grey.shade100,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.broken_image_outlined,
+                              color: Colors.grey, size: 20),
+                          const SizedBox(width: 8),
+                          Text('Could not load image',
+                              style: TextStyle(
+                                  color: Colors.grey.shade500, fontSize: 12)),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              );
+            }),
           ],
         ],
       ),
@@ -279,8 +393,8 @@ class PrescriptionDetailScreen extends StatelessWidget {
           borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
       builder: (_) => _OcrPreviewSheet(
         results: results,
-        memberId: memberId,
-        prescriptionId: prescription.id,
+        memberId: widget.memberId,
+        prescriptionId: _prescription.id,
       ),
     );
   }

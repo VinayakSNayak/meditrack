@@ -22,65 +22,81 @@ class BodyVitalsViewScreen extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.w600, fontSize: 20),
         ),
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirestoreService.getBodyVitalMetrics(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+      // Outer: resolve active member id
+      body: StreamBuilder<String?>(
+        stream: FirestoreService.getActiveMemberId(),
+        builder: (context, memberSnap) {
+          if (!memberSnap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          final docs = snapshot.data!.docs;
-
-          if (docs.isEmpty) {
-            return const Center(
-              child: Text(
-                "No body vitals added yet",
-                style: TextStyle(fontSize: 16),
-              ),
-            );
+          final memberId = memberSnap.data;
+          if (memberId == null) {
+            return const Center(child: Text("No member selected"));
           }
 
-          final Map<String,
-              QueryDocumentSnapshot<Map<String, dynamic>>> latestMetrics = {};
+          // Inner: direct Firestore query for this member
+          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirestoreService.getBodyVitalsForMember(memberId),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-          for (var doc in docs) {
-            final data = doc.data();
+              final docs = snapshot.data!.docs;
 
-            if (!data.containsKey('type') ||
-                !data.containsKey('recordDate')) {
-              continue;
-            }
+              if (docs.isEmpty) {
+                return const Center(
+                  child: Text(
+                    "No body vitals added yet",
+                    style: TextStyle(fontSize: 16),
+                  ),
+                );
+              }
 
-            final type = data['type'];
+              // Keep only the latest entry per type (docs already sorted
+              // by recordDate descending from Firestore)
+              final Map<String,
+                  QueryDocumentSnapshot<Map<String, dynamic>>> latestMetrics = {};
 
-            if (!latestMetrics.containsKey(type)) {
-              latestMetrics[type] = doc;
-            }
-          }
+              for (var doc in docs) {
+                final data = doc.data();
+                if (!data.containsKey('type') || !data.containsKey('recordDate')) {
+                  continue;
+                }
+                final type = data['type'] as String;
+                if (!latestMetrics.containsKey(type)) {
+                  latestMetrics[type] = doc;
+                }
+              }
 
-          final sortedMetrics = latestMetrics.values.toList()
-            ..sort((a, b) {
-              final aDate =
-              (a['recordDate'] as Timestamp).toDate();
-              final bDate =
-              (b['recordDate'] as Timestamp).toDate();
-              return bDate.compareTo(aDate);
-            });
+              final sortedMetrics = latestMetrics.values.toList()
+                ..sort((a, b) {
+                  // Sort cards by most-recently created type
+                  final aTs = a.data()['createdAt'] as Timestamp?;
+                  final bTs = b.data()['createdAt'] as Timestamp?;
+                  final aDate = aTs?.toDate() ??
+                      (a['recordDate'] as Timestamp).toDate();
+                  final bDate = bTs?.toDate() ??
+                      (b['recordDate'] as Timestamp).toDate();
+                  return bDate.compareTo(aDate);
+                });
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: sortedMetrics.length,
-            itemBuilder: (context, index) {
-              final doc = sortedMetrics[index];
-              final data = doc.data();
+              return ListView.builder(
+                padding: const EdgeInsets.all(20),
+                itemCount: sortedMetrics.length,
+                itemBuilder: (context, index) {
+                  final doc = sortedMetrics[index];
+                  final data = doc.data();
 
-              return _metricCard(
-                context,
-                type: data['type'],
-                value: data['value'].toString(),
-                unit: data['unit'],
-                docId: doc.id,
-                fullData: data,
+                  return _metricCard(
+                    context,
+                    type: data['type'] as String,
+                    value: data['value'].toString(),
+                    unit: data['unit'] as String,
+                    docId: doc.id,
+                    fullData: data,
+                  );
+                },
               );
             },
           );

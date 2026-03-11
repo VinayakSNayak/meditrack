@@ -2,25 +2,29 @@
 
     <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- SCHEDULE_EXACT_ALARM: runtime-grantable on API 31-32 (user must allow in settings) -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <!-- USE_EXACT_ALARM: auto-granted on API 33+ for alarm/reminder apps.
+         Required for exactAllowWhileIdle mode used by daily medicine reminders.
+         Without this, exact alarms are denied on API 33+ and notifications are silently dropped. -->
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
     <!-- BUG FIX: Added for reminder persistence after device reboot -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <!-- Biometrics -->
     <uses-permission android:name="android.permission.USE_BIOMETRIC"/>
-    <uses-permission android:name="android.permission.USE_FINGERPRINT"/>
+    <!-- USE_FINGERPRINT removed: deprecated, USE_BIOMETRIC covers it -->
     <!-- Internet -->
     <uses-permission android:name="android.permission.INTERNET"/>
     <!-- Camera (OCR) -->
     <uses-permission android:name="android.permission.CAMERA"/>
+    <uses-feature android:name="android.hardware.camera" android:required="false"/>
 
     <application
         android:label="MediTrack"
-        android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
 
         <activity
-            android:name=".MainActivity"
+            android:name="com.meditrack.app.meditrack.MainActivity"
             android:exported="true"
             android:launchMode="singleTop"
             android:taskAffinity=""
@@ -54,7 +58,7 @@
 
         <receiver
             android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver"
-            android:exported="false"/>
+            android:exported="true"/>
 
         <meta-data
             android:name="flutterEmbedding"

@@ -12,7 +12,9 @@ import '../prescription/add_prescription_screen.dart';
 import '../chatbot/chatbot_screen.dart';
 import '../profile/profile_screen.dart';
 import '../health/health_and_stats_screen.dart';
+import '../health/health_records_screen.dart';
 import '../reminder/reminder_screen.dart';
+import '../report/health_report_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -37,19 +39,21 @@ class _HomeScreenState extends State<HomeScreen> {
           ? AppBar(
               backgroundColor: Theme.of(context).cardColor,
               elevation: 0,
-              title: const MemberSelector(),
+              title: Text(tr('app_name'),
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w700, fontSize: 18)),
             )
           : null,
       body: SafeArea(
         child: IndexedStack(
           index: currentIndex,
-          children: const [
-            _HomeContent(),          // 0 — Home
-            PrescriptionListScreen(), // 1 — Meds
-            HealthAndStatsScreen(),  // 2 — Health & Stats (combined)
-            ReminderScreen(),        // 3 — Reminders
-            ChatbotScreen(),         // 4 — Chat
-            ProfileScreen(),         // 5 — Profile
+          children: [
+            _HomeContent(onSwitchTab: switchTab), // 0 — Home
+            const PrescriptionListScreen(),        // 1 — Meds
+            const HealthAndStatsScreen(),          // 2 — Health & Stats
+            const ReminderScreen(),                // 3 — Reminders
+            const ChatbotScreen(),                 // 4 — Chat
+            const ProfileScreen(),                 // 5 — Profile
           ],
         ),
       ),
@@ -108,7 +112,8 @@ class _HomeScreenState extends State<HomeScreen> {
 // ========================= HOME CONTENT =========================
 
 class _HomeContent extends StatelessWidget {
-  const _HomeContent();
+  final void Function(int) onSwitchTab;
+  const _HomeContent({required this.onSwitchTab});
 
   @override
   Widget build(BuildContext context) {
@@ -120,7 +125,8 @@ class _HomeContent extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Greeting
+
+          // ── SECTION 1: Greeting (unchanged logic) ──────────────────
           StreamBuilder<DocumentSnapshot<Map<String, dynamic>>?>(
             stream: FirestoreService.getAccountOwner(),
             builder: (context, snapshot) {
@@ -143,28 +149,69 @@ class _HomeContent extends StatelessWidget {
             },
           ),
 
-          const SizedBox(height: 24),
+          const SizedBox(height: 16),
 
-          // Today's Medicines — uses new nested medicine structure
+          // ── SECTION 2: Active Profile Selector ─────────────────────
+          _card(
+            context,
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: Colors.green.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child:
+                      const Icon(Icons.person, color: Colors.green, size: 18),
+                ),
+                const SizedBox(width: 10),
+                Text(tr('profile'),
+                    style: const TextStyle(
+                        fontSize: 13, color: Colors.grey)),
+                const Spacer(),
+                // MemberSelector dropdown — unchanged logic & data flow
+                const MemberSelector(),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 20),
+
+          // ── SECTION 3: Today's Medicines (unchanged logic) ──────────
           _card(
             context,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("Today's Medicines",
-                    style: TextStyle(
-                        fontSize: 16, fontWeight: FontWeight.w600)),
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: const Icon(Icons.medication_liquid_outlined,
+                          color: Colors.blue, size: 18),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(tr('todays_medicines'),
+                        style: const TextStyle(
+                            fontSize: 16, fontWeight: FontWeight.w600)),
+                  ],
+                ),
                 const SizedBox(height: 16),
                 Consumer<MemberProvider>(
                   builder: (context, memberProvider, _) {
                     final memberId = memberProvider.activeMemberId;
                     if (memberId == null) {
-                      return const Text('No profile selected',
-                          style: TextStyle(color: Colors.grey));
+                      return Text('No profile selected',
+                          style: const TextStyle(color: Colors.grey));
                     }
                     return FutureBuilder<List<Map<String, dynamic>>>(
-                      // ValueKey forces a fresh Future when memberId changes,
-                      // preventing stale data from the previous member.
+                      // ValueKey forces a fresh Future when memberId changes
                       key: ValueKey(memberId),
                       future: PrescriptionFirestoreService
                           .getActiveMedicinesForToday(memberId),
@@ -177,8 +224,8 @@ class _HomeContent extends StatelessWidget {
                         }
                         final items = snapshot.data ?? [];
                         if (items.isEmpty) {
-                          return const Text('No medicines for today',
-                              style: TextStyle(color: Colors.grey));
+                          return Text(tr('no_medicines_today'),
+                              style: const TextStyle(color: Colors.grey));
                         }
                         return Column(
                           children: items.map((item) {
@@ -188,8 +235,7 @@ class _HomeContent extends StatelessWidget {
                             final timeStr = DateFormat('hh:mm a')
                                 .format(med.reminderTime as DateTime);
                             return Padding(
-                              padding:
-                                  const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.only(bottom: 10),
                               child: _medicineRow(context, name, timeStr),
                             );
                           }).toList(),
@@ -204,49 +250,52 @@ class _HomeContent extends StatelessWidget {
 
           const SizedBox(height: 22),
 
-          // Quick Actions
-          const Text('Quick Actions',
-              style:
-                  TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+          // ── SECTION 4: Quick Actions (3 updated tiles) ─────────────
+          Text(tr('quick_actions'),
+              style: const TextStyle(
+                  fontSize: 16, fontWeight: FontWeight.w600)),
           const SizedBox(height: 14),
           Row(
             children: [
+              // 1 — Add Prescription
               Expanded(
                 child: _actionTile(
-                  Icons.add,
-                  'Add\nPrescription',
-                  Colors.blue,
-                  () => Navigator.push(
+                  context: context,
+                  icon: Icons.note_add_outlined,
+                  label: tr('add_prescription'),
+                  color: Colors.blue,
+                  onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) =>
-                              const AddPrescriptionScreen())),
+                          builder: (_) => const AddPrescriptionScreen())),
                 ),
               ),
               const SizedBox(width: 12),
+              // 2 — Add Health Record
               Expanded(
                 child: _actionTile(
-                  Icons.camera_alt,
-                  'Scan\nPrescription',
-                  Colors.purple,
-                  () => Navigator.push(
+                  context: context,
+                  icon: Icons.monitor_heart_outlined,
+                  label: tr('health_records'),
+                  color: Colors.teal,
+                  onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(
-                          builder: (_) =>
-                              const AddPrescriptionScreen())),
+                          builder: (_) => const HealthRecordsScreen())),
                 ),
               ),
               const SizedBox(width: 12),
+              // 3 — Generate Health Report
               Expanded(
                 child: _actionTile(
-                  Icons.alarm,
-                  'Reminders',
-                  Colors.orange,
-                  () {
-                    final homeState = context
-                        .findAncestorStateOfType<_HomeScreenState>();
-                    homeState?.switchTab(3);
-                  },
+                  context: context,
+                  icon: Icons.description_outlined,
+                  label: tr('generate_report'),
+                  color: Colors.green,
+                  onTap: () => Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                          builder: (_) => const HealthReportScreen())),
                 ),
               ),
             ],
@@ -254,66 +303,107 @@ class _HomeContent extends StatelessWidget {
 
           const SizedBox(height: 22),
 
-          // Health & Stats shortcut
-          GestureDetector(
-            onTap: () {
-              final homeState =
-                  context.findAncestorStateOfType<_HomeScreenState>();
-              homeState?.switchTab(2);
-            },
-            child: Container(
-              padding: const EdgeInsets.all(18),
-              decoration: BoxDecoration(
-                color: Theme.of(context).cardColor,
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
-                      blurRadius: 10,
-                      offset: const Offset(0, 4))
-                ],
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(10),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.favorite,
-                        color: Colors.green, size: 22),
-                  ),
-                  const SizedBox(width: 14),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Health & Stats',
-                            style: TextStyle(
-                                fontWeight: FontWeight.w600,
-                                fontSize: 15)),
-                        Text('Records, vitals & adherence charts',
-                            style: TextStyle(
-                                color: Colors.grey, fontSize: 12)),
-                      ],
-                    ),
-                  ),
-                  const Icon(Icons.arrow_forward_ios,
-                      size: 14, color: Colors.grey),
-                ],
-              ),
-            ),
-          ),
+          // ── SECTION 5: Weekly Adherence Summary ────────────────────
+          _weeklyAdherenceCard(context),
         ],
       ),
     );
   }
 
-  Widget _card(BuildContext context, {required Widget child}) {
+  // ── Weekly adherence card — uses existing FirestoreService.getWeeklyAdherenceRate() ──
+  Widget _weeklyAdherenceCard(BuildContext context) {
+    return FutureBuilder<double>(
+      future: FirestoreService.getWeeklyAdherenceRate(),
+      builder: (context, snapshot) {
+        final rate = snapshot.data ?? 0.0;
+        final pct = (rate * 100).round();
+        final Color barColor = pct >= 80
+            ? Colors.green
+            : pct >= 50
+                ? Colors.orange
+                : Colors.redAccent;
+
+        return GestureDetector(
+          onTap: () => onSwitchTab(2),
+          child: _card(
+            context,
+            child: Row(
+              children: [
+                // Circular progress gauge
+                SizedBox(
+                  width: 58,
+                  height: 58,
+                  child: Stack(
+                    fit: StackFit.expand,
+                    children: [
+                      CircularProgressIndicator(
+                        value: snapshot.hasData ? rate.clamp(0.0, 1.0) : null,
+                        strokeWidth: 6,
+                        backgroundColor:
+                            barColor.withValues(alpha: 0.15),
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(barColor),
+                      ),
+                      if (snapshot.hasData)
+                        Center(
+                          child: Text('$pct%',
+                              style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w700,
+                                  color: barColor)),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(tr('this_week'),
+                          style: const TextStyle(
+                              fontSize: 12, color: Colors.grey)),
+                      const SizedBox(height: 3),
+                      Text(tr('adherence_rate'),
+                          style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600)),
+                      const SizedBox(height: 8),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(4),
+                        child: LinearProgressIndicator(
+                          value: snapshot.hasData
+                              ? rate.clamp(0.0, 1.0)
+                              : null,
+                          minHeight: 7,
+                          backgroundColor:
+                              barColor.withValues(alpha: 0.15),
+                          valueColor:
+                              AlwaysStoppedAnimation<Color>(barColor),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                const Icon(Icons.arrow_forward_ios,
+                    size: 14, color: Colors.grey),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────
+
+  Widget _card(BuildContext context,
+      {required Widget child,
+      EdgeInsetsGeometry padding = const EdgeInsets.all(20)}) {
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(20),
+      padding: padding,
       decoration: BoxDecoration(
         color: Theme.of(context).cardColor,
         borderRadius: BorderRadius.circular(24),
@@ -359,12 +449,17 @@ class _HomeContent extends StatelessWidget {
     );
   }
 
-  Widget _actionTile(
-      IconData icon, String label, Color color, VoidCallback onTap) {
+  Widget _actionTile({
+    required BuildContext context,
+    required IconData icon,
+    required String label,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 18),
+        padding: const EdgeInsets.symmetric(vertical: 18, horizontal: 6),
         decoration: BoxDecoration(
           color: color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(20),
@@ -373,14 +468,16 @@ class _HomeContent extends StatelessWidget {
         ),
         child: Column(
           children: [
-            Icon(icon, color: color, size: 28),
+            Icon(icon, color: color, size: 26),
             const SizedBox(height: 8),
             Text(label,
                 style: TextStyle(
                     color: color,
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w600),
-                textAlign: TextAlign.center),
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis),
           ],
         ),
       ),

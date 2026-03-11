@@ -3,7 +3,6 @@ import 'dart:developer' as dev;
 import 'package:firebase_storage/firebase_storage.dart';
 
 /// Firebase Storage service for prescription images.
-/// Requires firebase_storage: ^12.3.0 (already in pubspec.yaml).
 class StorageService {
   static final _storage = FirebaseStorage.instance;
 
@@ -15,14 +14,43 @@ class StorageService {
     required String prescriptionId,
   }) async {
     try {
+      dev.log('[StorageService] uploadPrescriptionImage ▶  '
+          'file=${file.path}  uid=$uid  prescriptionId=$prescriptionId',
+          name: 'StorageService');
+
+      // Preserve original extension so Firebase Storage sets correct content type
+      final extension = file.path.split('.').last.toLowerCase();
+      final validExtensions = ['jpg', 'jpeg', 'png', 'webp'];
+      // HEIC/HEIF not supported by Image.network widget — treat as jpg
+      final ext = validExtensions.contains(extension) ? extension : 'jpg';
+
+      dev.log('[StorageService] detected extension="$extension" → using ext="$ext"',
+          name: 'StorageService');
+
       final ref = _storage
           .ref()
-          .child('prescriptions/$uid/$prescriptionId.jpg');
-      await ref.putFile(file);
-      return await ref.getDownloadURL();
-    } catch (e) {
-      dev.log('[StorageService] uploadPrescriptionImage failed: $e',
+          .child('prescriptions/$uid/$prescriptionId.$ext');
+
+      dev.log('[StorageService] storage path: ${ref.fullPath}',
           name: 'StorageService');
+
+      final metadata = SettableMetadata(
+        contentType: ext == 'png' ? 'image/png' : 'image/jpeg',
+      );
+
+      final task = await ref.putFile(file, metadata);
+      dev.log('[StorageService] putFile complete  state=${task.state}',
+          name: 'StorageService');
+
+      final url = await ref.getDownloadURL();
+      dev.log('[StorageService] uploadPrescriptionImage ✓  url=$url',
+          name: 'StorageService');
+      return url;
+    } catch (e, stack) {
+      dev.log('[StorageService] uploadPrescriptionImage ✗ FAILED: $e\n$stack',
+          name: 'StorageService',
+          error: e,
+          stackTrace: stack);
       return '';
     }
   }

@@ -34,12 +34,12 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
   DateTime? _startDate;
   DateTime? _endDate;
   bool _isSaving = false;
+  bool _reminderEnabled = true;
 
   bool get _isEditing => widget.existingMedicine != null;
 
   static const _frequencyOptions = [
     '', 'Once daily', 'Twice daily', 'Thrice daily',
-    '1-0-1', '1-1-1', '0-0-1', '1-0-0', 'SOS', 'As needed',
   ];
 
   static const _foodTimingOptions = [
@@ -86,6 +86,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
       _times = List<String>.from(m.times.isNotEmpty ? m.times : ['08:00']);
       _startDate = m.startDate;
       _endDate = m.endDate;
+      _reminderEnabled = m.reminderEnabled;
     } else {
       // Initialise default time slots for blank form
       _initTimesForFrequency(_frequency);
@@ -120,6 +121,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
           endDate: _endDate,
           notes: _notesCtrl.text.trim(),
           oldNotificationIds: widget.existingMedicine!.notificationIds,
+          reminderEnabled: _reminderEnabled,
         );
       } else {
         await PrescriptionFirestoreService.addMedicine(
@@ -133,6 +135,7 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
           startDate: _startDate,
           endDate: _endDate,
           notes: _notesCtrl.text.trim(),
+          reminderEnabled: _reminderEnabled,
         );
       }
       if (mounted) Navigator.pop(context);
@@ -246,9 +249,35 @@ class _AddMedicineScreenState extends State<AddMedicineScreen> {
                   )),
               const SizedBox(height: 12),
 
-              // Dynamic reminder time pickers (one per dose)
-              ..._buildTimePickers(cardBg),
+              // Enable Reminder toggle
+              _field(cardBg,
+                  child: SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    secondary: Icon(
+                      _reminderEnabled ? Icons.notifications_active_outlined : Icons.notifications_off_outlined,
+                      color: _reminderEnabled ? Colors.green : Colors.grey,
+                    ),
+                    title: const Text('Enable Reminder'),
+                    subtitle: Text(
+                      _reminderEnabled
+                          ? 'Notifications will be scheduled'
+                          : 'No notifications will be sent',
+                      style: TextStyle(
+                          color: _reminderEnabled ? Colors.green : Colors.grey,
+                          fontSize: 12),
+                    ),
+                    value: _reminderEnabled,
+                    activeThumbColor: Colors.green,
+                    activeTrackColor: Colors.green.withValues(alpha: 0.4),
+                    onChanged: (v) => setState(() => _reminderEnabled = v),
+                  )),
               const SizedBox(height: 12),
+
+              // Dynamic reminder time pickers (one per dose) — only when reminder enabled
+              if (_reminderEnabled) ...[
+                ..._buildTimePickers(cardBg),
+                const SizedBox(height: 12),
+              ],
 
               // Start date (nullable)
               _dateRow(

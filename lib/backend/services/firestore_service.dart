@@ -126,6 +126,44 @@ class FirestoreService {
     }
   }
 
+  /// Deletes a family member and all their associated sub-collections.
+  static Future<void> deleteMember(String memberId) async {
+    try {
+      final memberRef = _userDoc.collection('members').doc(memberId);
+
+      // Delete all known sub-collections of this member
+      const subCollections = [
+        'prescriptions',
+        'bodyVitals',
+        'bloodRecords',
+        'conditions',
+        'otherRecords',
+        'adherence_logs',
+        'reminders',
+      ];
+
+      for (final col in subCollections) {
+        final colRef = memberRef.collection(col);
+        final snap = await colRef.get();
+        for (final doc in snap.docs) {
+          // If it's prescriptions, also delete medicines sub-collection
+          if (col == 'prescriptions') {
+            final medSnap = await doc.reference.collection('medicines').get();
+            for (final med in medSnap.docs) {
+              await med.reference.delete();
+            }
+          }
+          await doc.reference.delete();
+        }
+      }
+
+      // Finally delete the member document itself
+      await memberRef.delete();
+    } catch (e) {
+      throw FirestoreException('Failed to delete member: $e');
+    }
+  }
+
   static Stream<String?> getActiveMemberId() {
     return _userDoc.snapshots().map((snapshot) {
       return snapshot.data()?['activeMemberId'] as String?;
@@ -262,6 +300,31 @@ class FirestoreService {
         .collection('bodyVitals')
         .orderBy('recordDate', descending: true)
         .snapshots());
+  }
+
+  /// Returns a direct Firestore stream for body vitals of a known member.
+  /// Ordered by createdAt descending so new edits always appear first,
+  /// regardless of the recordDate the user picked.
+  static Stream<QuerySnapshot<Map<String, dynamic>>>
+      getBodyVitalsForMember(String memberId) {
+    return _userDoc
+        .collection('members')
+        .doc(memberId)
+        .collection('bodyVitals')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
+  }
+
+  /// Returns a direct Firestore stream for blood records of a known member.
+  /// Ordered by createdAt descending so new edits always appear first.
+  static Stream<QuerySnapshot<Map<String, dynamic>>>
+      getBloodMetricsForMember(String memberId) {
+    return _userDoc
+        .collection('members')
+        .doc(memberId)
+        .collection('bloodRecords')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
   }
 
   static Future<void> addBloodMetric({
@@ -450,6 +513,18 @@ class FirestoreService {
         .collection('otherRecords')
         .orderBy('recordDate', descending: true)
         .snapshots());
+  }
+
+  /// Returns a direct Firestore stream for other records of a known member.
+  /// Ordered by createdAt so new edits always sort first.
+  static Stream<QuerySnapshot<Map<String, dynamic>>>
+      getOtherRecordsForMember(String memberId) {
+    return _userDoc
+        .collection('members')
+        .doc(memberId)
+        .collection('otherRecords')
+        .orderBy('createdAt', descending: true)
+        .snapshots();
   }
 
   // =========================================================

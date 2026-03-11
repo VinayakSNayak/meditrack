@@ -55,10 +55,17 @@ class PrescriptionFirestoreService {
   }) async {
     final docRef = _prescriptionsRef(memberId).doc();
 
+    dev.log('[PrescriptionFirestoreService] addPrescription ▶  '
+        'id=${docRef.id}  name="$name"  hasImage=${imageFile != null}',
+        name: 'PrescriptionFirestoreService');
+
     String? imageUrl;
     if (imageFile != null) {
       imageUrl = await _uploadImage(imageFile, docRef.id);
     }
+
+    dev.log('[PrescriptionFirestoreService] addPrescription — imageUrl=$imageUrl',
+        name: 'PrescriptionFirestoreService');
 
     await docRef.set({
       'name': name,
@@ -69,6 +76,10 @@ class PrescriptionFirestoreService {
       'medicineCount': 0,
       'createdAt': FieldValue.serverTimestamp(),
     });
+
+    dev.log('[PrescriptionFirestoreService] addPrescription ✓  '
+        'id=${docRef.id}  imageUrl=$imageUrl',
+        name: 'PrescriptionFirestoreService');
 
     return docRef.id;
   }
@@ -156,6 +167,7 @@ class PrescriptionFirestoreService {
     DateTime? startDate,
     DateTime? endDate,
     required String notes,
+    bool reminderEnabled = true,
   }) async {
     // ── DEBUG: confirm what times list arrived at the service layer ──
     dev.log(
@@ -172,17 +184,19 @@ class PrescriptionFirestoreService {
     final medicineId = docRef.id;
 
     // Schedule one notification per time slot via ReminderService.
-    // Returns {timeSlot: notifId} map — empty if endDate already passed.
-    final notificationMap = await ReminderService.scheduleMedicineReminders(
-      memberId: memberId,
-      prescriptionId: prescriptionId,
-      medicineId: medicineId,
-      medicineName: medicineName,
-      foodTiming: foodTiming,
-      times: times,
-      startDate: startDate,
-      endDate: endDate,
-    );
+    // Returns {timeSlot: notifId} map — empty if endDate already passed or reminder disabled.
+    final notificationMap = reminderEnabled && times.isNotEmpty
+        ? await ReminderService.scheduleMedicineReminders(
+            memberId: memberId,
+            prescriptionId: prescriptionId,
+            medicineId: medicineId,
+            medicineName: medicineName,
+            foodTiming: foodTiming,
+            times: times,
+            startDate: startDate,
+            endDate: endDate,
+          )
+        : <String, int>{};
 
     // First time slot as DateTime — stored as backward-compat reminderTime field.
     final firstTime = _parseTimeString(times.isNotEmpty ? times.first : '08:00');
@@ -203,6 +217,7 @@ class PrescriptionFirestoreService {
       'startDate': startDate != null ? Timestamp.fromDate(startDate) : null,
       'endDate': endDate != null ? Timestamp.fromDate(endDate) : null,
       'notes': notes,
+      'reminderEnabled': reminderEnabled,
       'createdAt': FieldValue.serverTimestamp(),
     };
 
@@ -263,6 +278,7 @@ class PrescriptionFirestoreService {
     required String notes,
     // Legacy param — only used if oldTimes is empty
     List<int> oldNotificationIds = const [],
+    bool reminderEnabled = true,
   }) async {
     // ── DEBUG: confirm what arrived at the service layer ──
     dev.log(
@@ -295,16 +311,18 @@ class PrescriptionFirestoreService {
     final effectiveEndDate = clearEndDate ? null : endDate;
 
     // ── 2. Schedule NEW notifications for ALL time slots ────────
-    final notificationMap = await ReminderService.scheduleMedicineReminders(
-      memberId: memberId,
-      prescriptionId: prescriptionId,
-      medicineId: medicineId,
-      medicineName: medicineName,
-      foodTiming: foodTiming,
-      times: times,
-      startDate: effectiveStartDate,
-      endDate: effectiveEndDate,
-    );
+    final notificationMap = reminderEnabled && times.isNotEmpty
+        ? await ReminderService.scheduleMedicineReminders(
+            memberId: memberId,
+            prescriptionId: prescriptionId,
+            medicineId: medicineId,
+            medicineName: medicineName,
+            foodTiming: foodTiming,
+            times: times,
+            startDate: effectiveStartDate,
+            endDate: effectiveEndDate,
+          )
+        : <String, int>{};
 
     final firstTime = _parseTimeString(times.isNotEmpty ? times.first : '08:00');
 
@@ -324,6 +342,7 @@ class PrescriptionFirestoreService {
           ? null
           : (endDate != null ? Timestamp.fromDate(endDate) : null),
       'notes': notes,
+      'reminderEnabled': reminderEnabled,
       'updatedAt': FieldValue.serverTimestamp(),
     };
 
@@ -480,12 +499,20 @@ class PrescriptionFirestoreService {
     return DateTime(now.year, now.month, now.day, hour, minute);
   }
 
-  static Future<String> _uploadImage(File file, String prescriptionId) async {
-    return StorageService.uploadPrescriptionImage(
+  static Future<String?> _uploadImage(File file, String prescriptionId) async {
+    dev.log('[PrescriptionFirestoreService] _uploadImage ▶  '
+        'prescriptionId=$prescriptionId  file=${file.path}',
+        name: 'PrescriptionFirestoreService');
+    final url = await StorageService.uploadPrescriptionImage(
       file: file,
       uid: _uid,
       prescriptionId: prescriptionId,
     );
+    // Return null if upload failed (empty string returned by StorageService on error)
+    final result = url.isEmpty ? null : url;
+    dev.log('[PrescriptionFirestoreService] _uploadImage ◀  result=$result',
+        name: 'PrescriptionFirestoreService');
+    return result;
   }
 
   // ========================= CONTEXT FOR CHATBOT =========================

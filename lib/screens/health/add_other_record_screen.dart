@@ -47,10 +47,9 @@ class _AddOtherRecordScreenState
       measurementController.text =
           data['measurement'] ?? "";
 
-      if (data['recordDate'] != null) {
-        selectedDate =
-            data['recordDate'].toDate();
-      }
+      // When editing, always use today's date so the new history entry
+      // sorts above the previous entries (recordDate desc ordering).
+      selectedDate = DateTime.now();
     }
   }
 

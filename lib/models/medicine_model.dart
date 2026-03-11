@@ -32,6 +32,9 @@ class MedicineModel {
   /// Key format: "HH:mm"  e.g. {"08:00": 12345, "21:00": 67890}
   final Map<String, int> notificationMap;
 
+  /// Whether the user has enabled reminders for this medicine.
+  final bool reminderEnabled;
+
   final DateTime createdAt;
 
   const MedicineModel({
@@ -45,6 +48,7 @@ class MedicineModel {
     this.endDate,
     required this.notes,
     required this.notificationMap,
+    this.reminderEnabled = true,
     required this.createdAt,
   });
 
@@ -66,7 +70,7 @@ class MedicineModel {
     final lower = frequency.toLowerCase().trim();
     if (lower == 'twice daily' || lower == 'bd') return 2;
     if (lower == 'thrice daily' || lower == 'tds') return 3;
-    // Pattern like "1-0-1", "1-1-1", "0-0-1" — count the 1s
+    // Backward compat for old pattern-based frequencies in existing data
     if (RegExp(r'^[01]-[01]-[01]$').hasMatch(lower)) {
       return lower.replaceAll(RegExp(r'[^1]'), '').length.clamp(1, 3);
     }
@@ -119,6 +123,8 @@ class MedicineModel {
       endDate: (map['endDate'] as Timestamp?)?.toDate(),
       notes: map['notes'] as String? ?? '',
       notificationMap: notificationMap,
+      // Default true for backward compat (old medicines without this field had reminders)
+      reminderEnabled: map['reminderEnabled'] as bool? ?? true,
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
     );
   }
@@ -134,6 +140,7 @@ class MedicineModel {
       'endDate': endDate != null ? Timestamp.fromDate(endDate!) : null,
       'notes': notes,
       'notificationMap': notificationMap,
+      'reminderEnabled': reminderEnabled,
       'createdAt': FieldValue.serverTimestamp(),
     };
   }
@@ -165,6 +172,7 @@ class MedicineModel {
     bool clearEndDate = false,
     String? notes,
     Map<String, int>? notificationMap,
+    bool? reminderEnabled,
     DateTime? createdAt,
   }) {
     return MedicineModel(
@@ -178,6 +186,7 @@ class MedicineModel {
       endDate: clearEndDate ? null : (endDate ?? this.endDate),
       notes: notes ?? this.notes,
       notificationMap: notificationMap ?? this.notificationMap,
+      reminderEnabled: reminderEnabled ?? this.reminderEnabled,
       createdAt: createdAt ?? this.createdAt,
     );
   }

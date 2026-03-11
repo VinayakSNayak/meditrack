@@ -20,43 +20,58 @@ class OtherRecordsViewScreen extends StatelessWidget {
           style: TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
-      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-        stream: FirestoreService.getOtherRecords(),
-        builder: (context, snapshot) {
-          if (!snapshot.hasData) {
+      // Outer: resolve active member id
+      body: StreamBuilder<String?>(
+        stream: FirestoreService.getActiveMemberId(),
+        builder: (context, memberSnap) {
+          if (!memberSnap.hasData) {
             return const Center(child: CircularProgressIndicator());
           }
-
-          if (snapshot.data!.docs.isEmpty) {
-            return const Center(
-              child: Text("No other records added yet"),
-            );
+          final memberId = memberSnap.data;
+          if (memberId == null) {
+            return const Center(child: Text("No member selected"));
           }
 
-          final docs = snapshot.data!.docs;
+          // Inner: direct Firestore query for this member
+          return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+            stream: FirestoreService.getOtherRecordsForMember(memberId),
+            builder: (context, snapshot) {
+              if (!snapshot.hasData) {
+                return const Center(child: CircularProgressIndicator());
+              }
 
-          // Show only the latest entry per recordName (docs are already
-          // sorted by recordDate descending from Firestore).
-          final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> latestByName = {};
-          for (final doc in docs) {
-            final name = doc.data()['recordName'] as String? ?? '';
-            if (!latestByName.containsKey(name)) {
-              latestByName[name] = doc;
-            }
-          }
-          final uniqueDocs = latestByName.values.toList();
+              if (snapshot.data!.docs.isEmpty) {
+                return const Center(
+                  child: Text("No other records added yet"),
+                );
+              }
 
-          return ListView.builder(
-            padding: const EdgeInsets.all(20),
-            itemCount: uniqueDocs.length,
-            itemBuilder: (context, index) {
-              final doc = uniqueDocs[index];
-              final data = doc.data();
+              final docs = snapshot.data!.docs;
 
-              return _recordCard(
-                context,
-                docId: doc.id,
-                data: data,
+              // Show only the latest entry per recordName (docs already
+              // sorted by recordDate descending from Firestore)
+              final Map<String, QueryDocumentSnapshot<Map<String, dynamic>>> latestByName = {};
+              for (final doc in docs) {
+                final name = doc.data()['recordName'] as String? ?? '';
+                if (!latestByName.containsKey(name)) {
+                  latestByName[name] = doc;
+                }
+              }
+              final uniqueDocs = latestByName.values.toList();
+
+              return ListView.builder(
+                padding: const EdgeInsets.all(20),
+                itemCount: uniqueDocs.length,
+                itemBuilder: (context, index) {
+                  final doc = uniqueDocs[index];
+                  final data = doc.data();
+
+                  return _recordCard(
+                    context,
+                    docId: doc.id,
+                    data: data,
+                  );
+                },
               );
             },
           );
@@ -164,12 +179,6 @@ class OtherRecordsViewScreen extends StatelessWidget {
     );
   }
 
-  void _confirmDelete(BuildContext context, String docId) {
-    // Get the recordName from the currently visible data via docId is not
-    // available here, so we look it up from the stream — instead we accept
-    // recordName directly.
-    _confirmDeleteByName(context, docId);
-  }
 
   void _confirmDeleteByName(BuildContext context, String recordName) {
     showDialog(

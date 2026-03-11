@@ -541,7 +541,6 @@ class _DashboardTabState extends State<_DashboardTab> {
   Map<String, int> _adherenceCounts = {};
   double _adherenceRate = 0.0;
   List<Map<String, dynamic>> _vitals = [];
-  String _selectedFilter = 'Weekly';
 
   @override
   void initState() {
@@ -555,12 +554,8 @@ class _DashboardTabState extends State<_DashboardTab> {
     if (!mounted) return;
     setState(() => _isLoading = true);
     try {
-      final counts = _selectedFilter == 'Weekly'
-          ? await FirestoreService.getWeeklyAdherenceCounts()
-          : await FirestoreService.getMonthlyAdherenceCounts();
-      final rate = _selectedFilter == 'Weekly'
-          ? await FirestoreService.getWeeklyAdherenceRate()
-          : await FirestoreService.getMonthlyAdherenceRate();
+      final counts = await FirestoreService.getWeeklyAdherenceCounts();
+      final rate = await FirestoreService.getWeeklyAdherenceRate();
       final vitals = await FirestoreService.getRecentVitalsForContext();
       if (mounted) {
         setState(() {
@@ -591,29 +586,10 @@ class _DashboardTabState extends State<_DashboardTab> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Filter Chips
-            Row(
-              children: ['Weekly', 'Monthly'].map((f) {
-                final selected = _selectedFilter == f;
-                return Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: FilterChip(
-                    label: Text(f),
-                    selected: selected,
-                    onSelected: (_) {
-                      setState(() => _selectedFilter = f);
-                      _loadData();
-                    },
-                    selectedColor: Colors.green.withValues(alpha: 0.15),
-                    checkmarkColor: Colors.green,
-                    labelStyle: TextStyle(
-                        color: selected ? Colors.green : Colors.grey,
-                        fontWeight: selected
-                            ? FontWeight.w600
-                            : FontWeight.normal),
-                  ),
-                );
-              }).toList(),
+            // Section header
+            const Text(
+              'This Week',
+              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
             ),
 
             const SizedBox(height: 18),
@@ -685,7 +661,7 @@ class _DashboardTabState extends State<_DashboardTab> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$_selectedFilter Adherence',
+                  'Weekly Adherence',
                   style: const TextStyle(
                       color: Colors.white70, fontSize: 13),
                 ),

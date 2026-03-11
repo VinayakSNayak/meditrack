@@ -118,6 +118,18 @@ class ReminderService {
       }
     }
 
+    // Skip if startDate is in the future — rescheduleAll will catch it on the correct day
+    if (startDate != null) {
+      final start = DateTime(startDate.year, startDate.month, startDate.day);
+      if (todayDay.isBefore(start)) {
+        dev.log(
+          '[ReminderService] ✗ Skipping "$medicineName" — startDate $start is in the future.',
+          name: 'ReminderService',
+        );
+        return {};
+      }
+    }
+
     if (times.isEmpty) {
       dev.log(
         '[ReminderService] ✗ times list is EMPTY for "$medicineName" — nothing scheduled.',
@@ -410,6 +422,16 @@ class ReminderService {
           );
 
           if (!active) {
+            skippedCount++;
+            continue;
+          }
+
+          // Skip rescheduling if reminder was explicitly disabled by user
+          if (!med.reminderEnabled) {
+            dev.log(
+              '[ReminderService]   ✗ Skipping "${med.medicineName}" — reminderEnabled=false',
+              name: 'ReminderService',
+            );
             skippedCount++;
             continue;
           }

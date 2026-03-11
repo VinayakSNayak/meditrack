@@ -1,3 +1,4 @@
+import 'dart:developer' as dev;
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -120,7 +121,8 @@ class _PrescriptionCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Image thumbnail (if available)
-            if (prescription.imageUrl != null)
+            if (prescription.imageUrl != null &&
+                prescription.imageUrl!.isNotEmpty)
               ClipRRect(
                 borderRadius:
                     const BorderRadius.vertical(top: Radius.circular(22)),
@@ -129,7 +131,15 @@ class _PrescriptionCard extends StatelessWidget {
                   height: 140,
                   width: double.infinity,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => const SizedBox(),
+                  errorBuilder: (context, error, stackTrace) {
+                    dev.log(
+                      '[PrescriptionListScreen] Image.network ERROR: $error  '
+                      'url=${prescription.imageUrl}',
+                      name: 'PrescriptionListScreen',
+                      error: error,
+                    );
+                    return const SizedBox();
+                  },
                 ),
               ),
             Padding(

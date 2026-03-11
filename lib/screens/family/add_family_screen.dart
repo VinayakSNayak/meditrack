@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:easy_localization/easy_localization.dart';
 import '../../backend/services/firestore_service.dart';
 
 class AddFamilyScreen extends StatefulWidget {
@@ -35,20 +36,20 @@ class _AddFamilyScreenState extends State<AddFamilyScreen> {
         elevation: 0,
         backgroundColor: const Color(0xFFF1F4FA),
         foregroundColor: Colors.black,
-        title: const Text(
-          'Add Family Member',
-          style: TextStyle(fontWeight: FontWeight.w600),
+        title: Text(
+          tr('add_family_member'),
+          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Column(
           children: [
-            _inputField(label: 'Name', controller: _nameController),
+            _inputField(label: tr('name'), controller: _nameController),
             const SizedBox(height: 16),
-            _inputField(label: 'Age', controller: _ageController),
+            _inputField(label: tr('age'), controller: _ageController),
             const SizedBox(height: 16),
-            _inputField(label: 'Relation', controller: _relationController),
+            _inputField(label: tr('relation'), controller: _relationController),
             const SizedBox(height: 24),
             Container(
               width: double.infinity,
@@ -59,9 +60,9 @@ class _AddFamilyScreenState extends State<AddFamilyScreen> {
               ),
               child: TextButton(
                 onPressed: _saveMember,
-                child: const Text(
-                  'Save Member',
-                  style: TextStyle(
+                child: Text(
+                  tr('save_member'),
+                  style: const TextStyle(
                     color: Colors.white,
                     fontSize: 16,
                     fontWeight: FontWeight.w600,

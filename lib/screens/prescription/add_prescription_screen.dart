@@ -60,9 +60,10 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
   Future<void> _pickImage(ImageSource source) async {
     final picker = ImagePicker();
     final xfile = await picker.pickImage(source: source, imageQuality: 85);
-    if (xfile != null) {
+    if (xfile != null && mounted) {
+      final picked = File(xfile.path);
       setState(() {
-        _imageFile = File(xfile.path);
+        _imageFile = picked;
         _removeExistingImage = false;
       });
     }
@@ -105,24 +106,49 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
         );
 
         if (mounted) {
+          // Fetch the saved document so the model includes imageUrl
+          PrescriptionModel savedPrescription;
+          try {
+            final snap = await PrescriptionFirestoreService
+                .rawPrescriptionsRef(memberId)
+                .doc(prescriptionId)
+                .get();
+            savedPrescription = snap.exists
+                ? PrescriptionModel.fromMap(snap.id, snap.data()!)
+                : PrescriptionModel(
+                    id: prescriptionId,
+                    name: _nameCtrl.text.trim(),
+                    hospitalName: _hospitalCtrl.text.trim(),
+                    diagnosis: _diagnosisCtrl.text.trim(),
+                    visitDate: _visitDate,
+                    medicineCount: 0,
+                    createdAt: DateTime.now(),
+                  );
+          } catch (_) {
+            // Fallback to local model if fetch fails
+            savedPrescription = PrescriptionModel(
+              id: prescriptionId,
+              name: _nameCtrl.text.trim(),
+              hospitalName: _hospitalCtrl.text.trim(),
+              diagnosis: _diagnosisCtrl.text.trim(),
+              visitDate: _visitDate,
+              medicineCount: 0,
+              createdAt: DateTime.now(),
+            );
+          }
+
           // Replace with detail screen so user can add medicines immediately
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (_) => PrescriptionDetailScreen(
-                prescription: PrescriptionModel(
-                  id: prescriptionId,
-                  name: _nameCtrl.text.trim(),
-                  hospitalName: _hospitalCtrl.text.trim(),
-                  diagnosis: _diagnosisCtrl.text.trim(),
-                  visitDate: _visitDate,
-                  medicineCount: 0,
-                  createdAt: DateTime.now(),
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(
+                builder: (_) => PrescriptionDetailScreen(
+                  prescription: savedPrescription,
+                  memberId: memberId,
                 ),
-                memberId: memberId,
               ),
-            ),
-          );
+            );
+          }
         }
       }
     } catch (e) {
@@ -264,8 +290,10 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
 
   Widget _imageSection(bool isDark, Color cardBg) {
     final existingUrl = widget.existingData?.imageUrl;
-    final hasImage = _imageFile != null ||
-        (existingUrl != null && !_removeExistingImage);
+    final hasNewImage = _imageFile != null;
+    final hasExistingImage =
+        existingUrl != null && existingUrl.isNotEmpty && !_removeExistingImage;
+    final hasImage = hasNewImage || hasExistingImage;
 
     return GestureDetector(
       onTap: () => _showImagePicker(),
@@ -282,9 +310,20 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
             ? Stack(fit: StackFit.expand, children: [
                 ClipRRect(
                   borderRadius: BorderRadius.circular(17),
-                  child: _imageFile != null
-                      ? Image.file(_imageFile!, fit: BoxFit.cover)
-                      : Image.network(existingUrl!, fit: BoxFit.cover),
+                  child: hasNewImage
+                      ? Image.file(
+                          _imageFile!,
+                          key: ValueKey(_imageFile!.path),
+                          fit: BoxFit.cover,
+                        )
+                      : Image.network(
+                          existingUrl!,
+                          fit: BoxFit.cover,
+                          errorBuilder: (_, __, ___) => const Center(
+                            child: Icon(Icons.broken_image_outlined,
+                                size: 40, color: Colors.grey),
+                          ),
+                        ),
                 ),
                 Positioned(
                   top: 8,
@@ -329,7 +368,7 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
       context: context,
       shape: const RoundedRectangleBorder(
           borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-      builder: (_) => SafeArea(
+      builder: (sheetContext) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -337,7 +376,7 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
               leading: const Icon(Icons.camera_alt_outlined),
               title: const Text('Take Photo'),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _pickImage(ImageSource.camera);
               },
             ),
@@ -345,7 +384,7 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
               leading: const Icon(Icons.photo_library_outlined),
               title: const Text('Pick from Gallery'),
               onTap: () {
-                Navigator.pop(context);
+                Navigator.pop(sheetContext);
                 _pickImage(ImageSource.gallery);
               },
             ),

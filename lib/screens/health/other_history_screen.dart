@@ -44,9 +44,15 @@ class OtherHistoryScreen extends StatelessWidget {
                 .doc(memberId)
                 .collection('otherRecords')
                 .where('recordName', isEqualTo: recordName)
-                .orderBy('recordDate', descending: true)
                 .snapshots(),
             builder: (context, snapshot) {
+              // Stuck-loading guard: show error if stream fails
+              if (snapshot.hasError) {
+                return const Center(
+                  child: Text("Failed to load history"),
+                );
+              }
+
               if (!snapshot.hasData) {
                 return const Center(child: CircularProgressIndicator());
               }
@@ -57,7 +63,21 @@ class OtherHistoryScreen extends StatelessWidget {
                 );
               }
 
-              final docs = snapshot.data!.docs;
+              // Sort in Dart by createdAt descending (avoids requiring a
+              // Firestore composite index on recordName + createdAt).
+              final docs = List.of(snapshot.data!.docs);
+              docs.sort((a, b) {
+                final aTs = a.data()['createdAt'] as Timestamp?;
+                final bTs = b.data()['createdAt'] as Timestamp?;
+                // Fall back to recordDate for older documents
+                final aDate = aTs?.toDate() ??
+                    (a.data()['recordDate'] as Timestamp?)?.toDate() ??
+                    DateTime(2000);
+                final bDate = bTs?.toDate() ??
+                    (b.data()['recordDate'] as Timestamp?)?.toDate() ??
+                    DateTime(2000);
+                return bDate.compareTo(aDate);
+              });
 
               return ListView.builder(
                 padding: const EdgeInsets.all(20),

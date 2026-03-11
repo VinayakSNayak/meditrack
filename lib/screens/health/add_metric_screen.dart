@@ -36,10 +36,11 @@ class _AddMetricScreenState extends State<AddMetricScreen> {
       valueController.text =
           widget.existingData!['value'].toString();
 
-      if (widget.existingData!['recordDate'] != null) {
-        selectedDate =
-            widget.existingData!['recordDate'].toDate();
-      }
+      // When editing, always use today's date so the new history entry
+      // sorts above the previous entries (recordDate desc ordering).
+      // Do NOT reuse the old date — that would make the new and old docs
+      // have the same recordDate, causing unpredictable ordering in the view.
+      selectedDate = DateTime.now();
     }
   }
 
