@@ -411,11 +411,18 @@ class PrescriptionFirestoreService {
   }
 
   /// Stream of medicines under a prescription.
+  /// includeMetadataChanges: true ensures that newly added medicines appear
+  /// immediately in the stream upon the local Firestore write (optimistic
+  /// update), without waiting for the server timestamp to be confirmed.
+  /// This is the fix for the "reminder appears after a delay" issue: the
+  /// new medicine document has a pending serverTimestamp on 'createdAt',
+  /// and without includeMetadataChanges the orderBy query would temporarily
+  /// exclude the document until the server resolves the timestamp.
   static Stream<List<MedicineModel>> medicinesStream(
       String memberId, String prescriptionId) {
     return _medicinesRef(memberId, prescriptionId)
         .orderBy('createdAt')
-        .snapshots()
+        .snapshots(includeMetadataChanges: true)
         .map((snap) => snap.docs
             .map((d) => MedicineModel.fromMap(d.id, d.data()))
             .toList());

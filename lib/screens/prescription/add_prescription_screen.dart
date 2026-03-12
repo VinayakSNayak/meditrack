@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'dart:io';
-import 'package:image_picker/image_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import '../../backend/services/prescription_firestore_service.dart';
@@ -31,8 +29,6 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
   final _diagnosisCtrl = TextEditingController();
 
   DateTime _visitDate = DateTime.now();
-  File? _imageFile;
-  bool _removeExistingImage = false;
   bool _isSaving = false;
 
   bool get _isEditing => widget.prescriptionId != null;
@@ -57,17 +53,6 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
     super.dispose();
   }
 
-  Future<void> _pickImage(ImageSource source) async {
-    final picker = ImagePicker();
-    final xfile = await picker.pickImage(source: source, imageQuality: 85);
-    if (xfile != null && mounted) {
-      final picked = File(xfile.path);
-      setState(() {
-        _imageFile = picked;
-        _removeExistingImage = false;
-      });
-    }
-  }
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
@@ -89,8 +74,8 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
           hospitalName: _hospitalCtrl.text.trim(),
           diagnosis: _diagnosisCtrl.text.trim(),
           visitDate: _visitDate,
-          newImageFile: _imageFile,
-          removeImage: _removeExistingImage,
+          newImageFile: null,
+          removeImage: false,
         );
         if (mounted) Navigator.pop(context);
       } else {
@@ -102,7 +87,7 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
           hospitalName: _hospitalCtrl.text.trim(),
           diagnosis: _diagnosisCtrl.text.trim(),
           visitDate: _visitDate,
-          imageFile: _imageFile,
+          imageFile: null,
         );
 
         if (mounted) {
@@ -188,9 +173,6 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Image section
-              _imageSection(isDark, cardBg),
-              const SizedBox(height: 20),
 
               // Prescription name
               _card(cardBg,
@@ -288,111 +270,6 @@ class _AddPrescriptionScreenState extends State<AddPrescriptionScreen> {
     );
   }
 
-  Widget _imageSection(bool isDark, Color cardBg) {
-    final existingUrl = widget.existingData?.imageUrl;
-    final hasNewImage = _imageFile != null;
-    final hasExistingImage =
-        existingUrl != null && existingUrl.isNotEmpty && !_removeExistingImage;
-    final hasImage = hasNewImage || hasExistingImage;
-
-    return GestureDetector(
-      onTap: () => _showImagePicker(),
-      child: Container(
-        height: 160,
-        width: double.infinity,
-        decoration: BoxDecoration(
-          color: cardBg,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(
-              color: Colors.green.withValues(alpha: 0.3), width: 1.5),
-        ),
-        child: hasImage
-            ? Stack(fit: StackFit.expand, children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(17),
-                  child: hasNewImage
-                      ? Image.file(
-                          _imageFile!,
-                          key: ValueKey(_imageFile!.path),
-                          fit: BoxFit.cover,
-                        )
-                      : Image.network(
-                          existingUrl!,
-                          fit: BoxFit.cover,
-                          errorBuilder: (_, __, ___) => const Center(
-                            child: Icon(Icons.broken_image_outlined,
-                                size: 40, color: Colors.grey),
-                          ),
-                        ),
-                ),
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: GestureDetector(
-                    onTap: () => setState(() {
-                      _imageFile = null;
-                      _removeExistingImage = true;
-                    }),
-                    child: Container(
-                      decoration: BoxDecoration(
-                          color: Colors.black54,
-                          borderRadius: BorderRadius.circular(20)),
-                      padding: const EdgeInsets.all(6),
-                      child: const Icon(Icons.close,
-                          color: Colors.white, size: 16),
-                    ),
-                  ),
-                ),
-              ])
-            : Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.add_photo_alternate_outlined,
-                      size: 40,
-                      color: isDark ? Colors.grey.shade400 : Colors.grey),
-                  const SizedBox(height: 8),
-                  Text('Add Prescription Image (Optional)',
-                      style: TextStyle(
-                          color: isDark
-                              ? Colors.grey.shade400
-                              : Colors.grey.shade600,
-                          fontSize: 13)),
-                ],
-              ),
-      ),
-    );
-  }
-
-  void _showImagePicker() {
-    showModalBottomSheet(
-      context: context,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(22))),
-      builder: (sheetContext) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: const Icon(Icons.camera_alt_outlined),
-              title: const Text('Take Photo'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _pickImage(ImageSource.camera);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.photo_library_outlined),
-              title: const Text('Pick from Gallery'),
-              onTap: () {
-                Navigator.pop(sheetContext);
-                _pickImage(ImageSource.gallery);
-              },
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _card(Color bg, {required Widget child}) {
     return Container(

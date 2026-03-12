@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
@@ -41,23 +42,154 @@ class ReminderScreen extends StatelessWidget {
 // _ReminderBody
 // =====================================================================
 
-class _ReminderBody extends StatelessWidget {
+class _ReminderBody extends StatefulWidget {
   final String memberId;
   const _ReminderBody({required this.memberId});
+
+  @override
+  State<_ReminderBody> createState() => _ReminderBodyState();
+}
+
+class _ReminderBodyState extends State<_ReminderBody> {
+  // ── stable per-prescription medicine stream subscriptions ──────
+  // Key: prescriptionId  |  Value: latest list of _RemEntry for that presc.
+  final Map<String, List<_RemEntry>> _entriesByPresc = {};
+  final Map<String, StreamSubscription<List<MedicineModel>>> _subsByPresc = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _prescSub;
+
+  // Combined list emitted to the StreamBuilder below
+  final StreamController<List<_RemEntry>> _controller =
+      StreamController<List<_RemEntry>>.broadcast();
+
+  @override
+  void initState() {
+    super.initState();
+    _subscribePrescriptions();
+  }
+
+  @override
+  void didUpdateWidget(_ReminderBody old) {
+    super.didUpdateWidget(old);
+    if (old.memberId != widget.memberId) {
+      // Member changed — tear down everything and restart
+      _cancelAll();
+      _entriesByPresc.clear();
+      _subsByPresc.clear();
+      _subscribePrescriptions();
+    }
+  }
+
+  void _subscribePrescriptions() {
+    _prescSub = PrescriptionFirestoreService
+        .rawPrescriptionsRef(widget.memberId)
+        .snapshots(includeMetadataChanges: true)
+        .listen((prescSnap) {
+      final currentIds = prescSnap.docs.map((d) => d.id).toSet();
+
+      // Remove subscriptions for prescriptions that no longer exist
+      final removed = _subsByPresc.keys
+          .where((id) => !currentIds.contains(id))
+          .toList();
+      for (final id in removed) {
+        _subsByPresc[id]?.cancel();
+        _subsByPresc.remove(id);
+        _entriesByPresc.remove(id);
+      }
+
+      // Add new subscriptions for prescriptions we haven't seen yet,
+      // and keep existing ones alive (no tear-down on doc update).
+      for (final prescDoc in prescSnap.docs) {
+        final prescId = prescDoc.id;
+        if (_subsByPresc.containsKey(prescId)) {
+          // Already subscribed — just update the prescription name in
+          // existing entries in case it was renamed.
+          final newName = prescDoc.data()['name'] as String? ?? '';
+          if (_entriesByPresc.containsKey(prescId)) {
+            final updated = _entriesByPresc[prescId]!
+                .map((e) => _RemEntry(
+                      prescriptionId: e.prescriptionId,
+                      prescriptionName: newName,
+                      medicine: e.medicine,
+                      timeSlot: e.timeSlot,
+                    ))
+                .toList();
+            _entriesByPresc[prescId] = updated;
+            _emit();
+          }
+          continue;
+        }
+
+        // New prescription — subscribe to its medicines stream.
+        final prescName = prescDoc.data()['name'] as String? ?? '';
+        final medStream = PrescriptionFirestoreService.medicinesStream(
+            widget.memberId, prescId);
+
+        final sub = medStream.listen((medicines) {
+          _entriesByPresc[prescId] = medicines
+              .expand((m) {
+                final slots = m.times.isNotEmpty
+                    ? m.times
+                    : [_formatTime(m.reminderTime)];
+                return slots.map((slot) => _RemEntry(
+                      prescriptionId: prescId,
+                      prescriptionName: prescName,
+                      medicine: m,
+                      timeSlot: slot,
+                    ));
+              })
+              .toList();
+          _emit();
+        });
+
+        _subsByPresc[prescId] = sub;
+      }
+
+      if (removed.isNotEmpty) _emit();
+    });
+  }
+
+  void _emit() {
+    if (!_controller.isClosed) {
+      _controller.add(_entriesByPresc.values.expand((e) => e).toList());
+    }
+  }
+
+  void _cancelAll() {
+    _prescSub?.cancel();
+    _prescSub = null;
+    for (final sub in _subsByPresc.values) {
+      sub.cancel();
+    }
+    _subsByPresc.clear();
+  }
+
+  @override
+  void dispose() {
+    _cancelAll();
+    _controller.close();
+    super.dispose();
+  }
+
+  static String _formatTime(DateTime dt) {
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
 
   @override
   Widget build(BuildContext context) {
     // Combine reminder entries stream with logged-keys stream so that
     // taken/skipped slots disappear immediately without a page refresh.
     return StreamBuilder<Set<String>>(
-      stream: ReminderService.loggedKeysStream(memberId),
+      stream: ReminderService.loggedKeysStream(widget.memberId),
       builder: (context, loggedSnap) {
         final loggedKeys = loggedSnap.data ?? const <String>{};
 
         return StreamBuilder<List<_RemEntry>>(
-          stream: _buildReminderStream(memberId),
+          stream: _controller.stream,
           builder: (context, snapshot) {
-            if (snapshot.connectionState == ConnectionState.waiting) {
+            if (snapshot.connectionState == ConnectionState.waiting &&
+                !snapshot.hasData) {
               return const Center(child: CircularProgressIndicator());
             }
 
@@ -100,113 +232,13 @@ class _ReminderBody extends StatelessWidget {
               separatorBuilder: (_, __) => const SizedBox(height: 14),
               itemBuilder: (context, i) => _ReminderCard(
                 entry: active[i],
-                memberId: memberId,
+                memberId: widget.memberId,
               ),
             );
           },
         );
       },
     );
-  }
-
-  /// Fully reactive stream — uses snapshots() for prescriptions so any
-  /// new prescription or medicine change is reflected immediately
-  /// without needing to close and reopen the screen.
-  static Stream<List<_RemEntry>> _buildReminderStream(String memberId) {
-    return PrescriptionFirestoreService
-        .rawPrescriptionsRef(memberId)
-        .snapshots()
-        .asyncExpand((prescSnap) {
-          if (prescSnap.docs.isEmpty) {
-            return Stream.value(<_RemEntry>[]);
-          }
-
-          // One stream per prescription — each emits a flat list of _RemEntry
-          // (one entry per medicine×timeSlot pair).
-          final streams = prescSnap.docs.map((prescDoc) {
-            final prescName = prescDoc.data()['name'] as String? ?? '';
-            return PrescriptionFirestoreService
-                .medicinesStream(memberId, prescDoc.id)
-                .map((medicines) => medicines
-                    .expand((m) {
-                      // Fan-out: one entry per time slot in this medicine.
-                      // If times is somehow empty, fall back to one entry
-                      // using the backward-compat reminderTime.
-                      final slots = m.times.isNotEmpty
-                          ? m.times
-                          : [_formatTime(m.reminderTime)];
-                      return slots.map((slot) => _RemEntry(
-                            prescriptionId: prescDoc.id,
-                            prescriptionName: prescName,
-                            medicine: m,
-                            timeSlot: slot,
-                          ));
-                    })
-                    .toList());
-          }).toList();
-
-          return _mergeStreams(streams);
-        });
-  }
-
-  /// Formats a DateTime to "HH:mm" string — used as fallback for legacy docs.
-  static String _formatTime(DateTime dt) {
-    final hh = dt.hour.toString().padLeft(2, '0');
-    final mm = dt.minute.toString().padLeft(2, '0');
-    return '$hh:$mm';
-  }
-
-  /// Merges multiple `Stream<List<_RemEntry>>` into one combined stream.
-  /// Emits the full flattened list whenever any source stream emits.
-  /// All subscriptions are cancelled when the returned stream is cancelled,
-  /// preventing memory leaks.
-  static Stream<List<_RemEntry>> _mergeStreams(
-      List<Stream<List<_RemEntry>>> streams) {
-    if (streams.isEmpty) {
-      return Stream.value([]);
-    }
-
-    // Use mutable list so the callback closure can update individual slots.
-    final latestValues = List<List<_RemEntry>>.generate(
-        streams.length, (_) => [], growable: false);
-    final subscriptions = <StreamSubscription<List<_RemEntry>>>[];
-    late StreamController<List<_RemEntry>> controller;
-    int completedCount = 0;
-
-    void cancelAll() {
-      for (final sub in subscriptions) {
-        sub.cancel();
-      }
-    }
-
-    controller = StreamController<List<_RemEntry>>(
-      onCancel: cancelAll,
-    );
-
-    for (int i = 0; i < streams.length; i++) {
-      final idx = i;
-      final sub = streams[idx].listen(
-        (data) {
-          latestValues[idx] = data;
-          if (!controller.isClosed) {
-            controller.add(latestValues.expand((e) => e).toList());
-          }
-        },
-        onDone: () {
-          completedCount++;
-          if (completedCount == streams.length && !controller.isClosed) {
-            controller.close();
-          }
-        },
-        onError: (e, st) {
-          if (!controller.isClosed) controller.addError(e, st as StackTrace?);
-        },
-        cancelOnError: false,
-      );
-      subscriptions.add(sub);
-    }
-
-    return controller.stream;
   }
 
   Widget _emptyState() {

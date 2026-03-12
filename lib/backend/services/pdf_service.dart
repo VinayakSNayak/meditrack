@@ -30,14 +30,43 @@ class PdfService {
   static Future<List<Map<String, dynamic>>> _getPrescriptionsForMember(
       String memberId) async {
     try {
+      // Sort by visitDate descending so newest prescriptions appear first.
+      // Fresh fetch from Firestore ensures deleted prescriptions are excluded.
       final snap = await _firestore
           .collection('users')
           .doc(_uid)
           .collection('members')
           .doc(memberId)
           .collection('prescriptions')
+          .orderBy('visitDate', descending: true)
           .get();
-      return snap.docs.map((d) => d.data()).toList();
+
+      final result = <Map<String, dynamic>>[];
+      for (final doc in snap.docs) {
+        final data = Map<String, dynamic>.from(doc.data());
+        data['prescriptionId'] = doc.id;
+
+        // Fetch medicines for this prescription
+        try {
+          final medsSnap = await _firestore
+              .collection('users')
+              .doc(_uid)
+              .collection('members')
+              .doc(memberId)
+              .collection('prescriptions')
+              .doc(doc.id)
+              .collection('medicines')
+              .orderBy('createdAt')
+              .get();
+          data['medicines'] =
+              medsSnap.docs.map((m) => m.data()).toList();
+        } catch (_) {
+          data['medicines'] = <Map<String, dynamic>>[];
+        }
+
+        result.add(data);
+      }
+      return result;
     } catch (_) {
       return [];
     }
@@ -69,19 +98,43 @@ class PdfService {
           .collection('members')
           .doc(memberId);
 
+      // Order by createdAt descending — matches the app's own query logic.
+      // This ensures newly edited values appear first, not old recordDate values.
       final bodySnap = await memberRef
           .collection('bodyVitals')
-          .orderBy('recordDate', descending: true)
-          .limit(10)
+          .orderBy('createdAt', descending: true)
           .get();
-      result.addAll(bodySnap.docs.map((d) => d.data()));
+      // Deduplicate: keep only the latest entry per type
+      final seenBodyTypes = <String>{};
+      for (final d in bodySnap.docs) {
+        final type = d.data()['type'] as String? ?? '';
+        if (seenBodyTypes.add(type)) result.add(d.data());
+      }
 
       final bloodSnap = await memberRef
           .collection('bloodRecords')
-          .orderBy('recordDate', descending: true)
-          .limit(10)
+          .orderBy('createdAt', descending: true)
           .get();
-      result.addAll(bloodSnap.docs.map((d) => d.data()));
+      final seenBloodTypes = <String>{};
+      for (final d in bloodSnap.docs) {
+        final type = d.data()['type'] as String? ?? '';
+        if (seenBloodTypes.add(type)) result.add(d.data());
+      }
+
+      // Also include other records if they exist
+      try {
+        final otherSnap = await memberRef
+            .collection('otherRecords')
+            .orderBy('createdAt', descending: true)
+            .get();
+        final seenOtherTypes = <String>{};
+        for (final d in otherSnap.docs) {
+          final type = d.data()['type'] as String? ?? '';
+          if (seenOtherTypes.add(type)) result.add(d.data());
+        }
+      } catch (_) {
+        // otherRecords collection may not exist — ignore
+      }
 
       return result;
     } catch (_) {
@@ -400,8 +453,11 @@ class PdfService {
 
   // ========================= ROW BUILDERS =========================
 
+  /// Builds a grouped prescription block: header (name / hospital / date)
+  /// followed by a sub-list of medicines belonging to this prescription.
   static pw.Widget _prescriptionRow(Map<String, dynamic> p) {
-    final name = p['name'] as String? ?? p['medicineName'] as String? ?? 'Unknown';
+    final name =
+        p['name'] as String? ?? p['medicineName'] as String? ?? 'Unknown';
     final hospital = p['hospitalName'] as String? ?? '';
     final diagnosis = p['diagnosis'] as String? ?? '';
     final visitTs = p['visitDate'] as Timestamp?;
@@ -409,27 +465,107 @@ class PdfService {
         ? DateFormat('dd MMM yyyy').format(visitTs.toDate())
         : '';
 
+    final medicines =
+        (p['medicines'] as List<dynamic>?)?.cast<Map<String, dynamic>>() ?? [];
+
+    return pw.Container(
+      margin: const pw.EdgeInsets.only(bottom: 10),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.green100),
+        borderRadius: pw.BorderRadius.circular(5),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          // ── Prescription header ──────────────────────────────────
+          pw.Container(
+            padding:
+                const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            decoration: const pw.BoxDecoration(
+              color: PdfColors.green50,
+              borderRadius: pw.BorderRadius.only(
+                topLeft: pw.Radius.circular(5),
+                topRight: pw.Radius.circular(5),
+              ),
+            ),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: [
+                pw.Text(
+                  name,
+                  style: pw.TextStyle(
+                      fontSize: 11, fontWeight: pw.FontWeight.bold),
+                ),
+                pw.SizedBox(height: 3),
+                pw.Row(
+                  children: [
+                    if (hospital.isNotEmpty) ...[
+                      pw.Text('Hospital: $hospital',
+                          style: const pw.TextStyle(
+                              fontSize: 9, color: PdfColors.grey700)),
+                      pw.SizedBox(width: 12),
+                    ],
+                    if (diagnosis.isNotEmpty) ...[
+                      pw.Text('Diagnosis: $diagnosis',
+                          style: const pw.TextStyle(
+                              fontSize: 9, color: PdfColors.grey700)),
+                      pw.SizedBox(width: 12),
+                    ],
+                    if (visitStr.isNotEmpty)
+                      pw.Text('Visit: $visitStr',
+                          style: const pw.TextStyle(
+                              fontSize: 9, color: PdfColors.grey600)),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          // ── Medicines list ───────────────────────────────────────
+          pw.Padding(
+            padding: const pw.EdgeInsets.all(8),
+            child: pw.Column(
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
+              children: medicines.isEmpty
+                  ? [
+                      pw.Text('  No medicines recorded',
+                          style: pw.TextStyle(
+                              fontSize: 9,
+                              color: PdfColors.grey500,
+                              fontStyle: pw.FontStyle.italic)),
+                    ]
+                  : medicines.map(_medicineSubRow).toList(),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// One line per medicine inside a prescription block.
+  static pw.Widget _medicineSubRow(Map<String, dynamic> m) {
+    final name = m['medicineName'] as String? ?? 'Unknown';
+    final dosage = m['dosage'] as String? ?? '';
+    final frequency = m['frequency'] as String? ?? '';
+    final foodTiming = m['foodTiming'] as String? ?? '';
+
+    final details = [
+      if (dosage.isNotEmpty) dosage,
+      if (frequency.isNotEmpty) frequency,
+      if (foodTiming.isNotEmpty) foodTiming,
+    ].join(' • ');
+
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 4),
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
       child: pw.Row(
         children: [
+          pw.Text('  ◦ ',
+              style: const pw.TextStyle(fontSize: 10, color: PdfColors.green700)),
           pw.Expanded(
-              flex: 3,
-              child: pw.Text('• $name',
-                  style: pw.TextStyle(
-                      fontWeight: pw.FontWeight.bold, fontSize: 11))),
-          pw.Expanded(
-              flex: 2,
-              child: pw.Text(hospital,
-                  style: const pw.TextStyle(fontSize: 10))),
-          pw.Expanded(
-              flex: 2,
-              child: pw.Text(diagnosis,
-                  style: const pw.TextStyle(fontSize: 10))),
-          pw.Expanded(
-              flex: 2,
-              child: pw.Text(visitStr,
-                  style: const pw.TextStyle(fontSize: 10))),
+            child: pw.Text(
+              name + (details.isNotEmpty ? '   ($details)' : ''),
+              style: const pw.TextStyle(fontSize: 10),
+            ),
+          ),
         ],
       ),
     );
@@ -467,7 +603,9 @@ class PdfService {
     final type = v['type'] as String? ?? 'Unknown';
     final value = v['value']?.toString() ?? '';
     final unit = v['unit'] as String? ?? '';
-    final dateStamp = v['recordDate'] as Timestamp?;
+    // Prefer recordDate; fall back to createdAt (used by history-aware records)
+    final dateStamp =
+        (v['recordDate'] ?? v['createdAt']) as Timestamp?;
     final dateStr = dateStamp != null
         ? DateFormat('dd MMM yyyy').format(dateStamp.toDate())
         : '';
