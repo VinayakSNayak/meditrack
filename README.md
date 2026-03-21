@@ -1,16 +1,151 @@
-# meditrack
+# 🩺 MediTrack
 
-Healthcare App using Flutter And Firebase project.
+### One App to Remember, Record & Revive
 
-## Getting Started
+![Flutter](https://img.shields.io/badge/Flutter-3.x-blue?logo=flutter)
+![Firebase](https://img.shields.io/badge/Firebase-Backend-orange?logo=firebase)
+![Platform](https://img.shields.io/badge/Platform-Android%20%7C%20iOS-green)
+![Status](https://img.shields.io/badge/Status-Active-success)
 
-This project is a starting point for a Flutter application.
+---
 
-A few resources to get you started if this is your first Flutter project:
+## 🚀 Overview
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+**MediTrack** is a smart healthcare mobile application that helps users manage **medications, prescriptions, and health records** in one place.
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Built using **Flutter + Firebase + AI**, it ensures secure, reliable, and intelligent healthcare tracking.
+
+---
+
+## ✨ Features
+
+### 💊 Smart Medicine Reminder
+
+* Offline notifications
+* Snooze & Mark-as-Taken
+* Ensures no missed doses
+
+### 📄 OCR Prescription Scanner
+
+* Scan prescriptions using Google ML Kit
+* Auto-extract medicine details
+
+### 📊 Health Dashboard
+
+* Track BP, sugar, weight
+* Visual charts using `fl_chart`
+
+### 👨‍👩‍👧 Family Management
+
+* Multiple profiles in one account
+
+### 🔐 Security
+
+* Firebase Authentication
+* Biometric login
+* Encrypted storage
+
+### 🌐 Multilingual
+
+* English, Hindi, Kannada
+
+### 🤖 AI Chatbot
+
+* Context-aware assistant
+* Safe health guidance
+
+### 📄 PDF Reports
+
+* Generate and share reports
+
+---
+
+## 🛠️ Tech Stack
+
+* **Flutter**
+* **Firebase (Firestore, Auth, Storage)**
+* **Google ML Kit (OCR)**
+* **flutter_local_notifications**
+* **fl_chart**
+* **GitHub Models API (GPT-4o-mini)**
+
+---
+
+## 📂 Project Structure
+
+```
+lib/
+ ├── screens/
+ ├── services/
+ ├── models/
+ ├── widgets/
+ └── main.dart
+```
+
+---
+
+## ⚙️ Setup
+
+### Clone repo
+
+```
+git clone https://github.com/your-username/meditrack.git
+cd meditrack
+```
+
+### Install dependencies
+
+```
+flutter pub get
+```
+
+### Firebase setup
+
+* Add `google-services.json` → `android/app/`
+* Enable Auth, Firestore, Storage
+
+### Add API key
+
+Create `.env`
+
+```
+GITHUB_TOKEN=your_api_key_here
+```
+
+---
+
+## 🔐 Security
+
+* API keys are not stored in repo
+* Firestore rules protect user data
+* Biometric authentication enabled
+
+---
+
+## 📱 Screenshots
+
+(Add images here)
+
+---
+
+## 🎯 Highlights
+
+* Full-stack Flutter app
+* AI-powered healthcare assistant
+* Offline-first reminders
+* Secure & scalable
+
+---
+
+## 👨‍💻 Authors
+
+* Vinayak S Nayak
+* Vijay Ramesh Kai
+* Varun V
+* Umesh
+
+---
+
+## ⭐ Support
+
+If you like this project, give it a ⭐
