@@ -32,7 +32,7 @@ Built using **Flutter + Firebase + AI**, it ensures secure, reliable, and intell
 
 ### 📊 Health Dashboard
 
-* Track BP, sugar, weight
+* Track medicine adherence (taken vs missed doses)
 * Visual charts using `fl_chart`
 
 ### 👨‍👩‍👧 Family Management
@@ -42,7 +42,6 @@ Built using **Flutter + Firebase + AI**, it ensures secure, reliable, and intell
 ### 🔐 Security
 
 * Firebase Authentication
-* Biometric login
 * Encrypted storage
 
 ### 🌐 Multilingual
@@ -118,7 +117,6 @@ GITHUB_TOKEN=your_api_key_here
 
 * API keys are not stored in repo
 * Firestore rules protect user data
-* Biometric authentication enabled
 
 ---
 
@@ -139,7 +137,7 @@ GITHUB_TOKEN=your_api_key_here
 
 ## 👨‍💻 Authors
 
-* Vinayak S Nayak
+* Vinayak Shantha Nayak
 * Vijay Ramesh Kai
 * Varun V
 * Umesh
