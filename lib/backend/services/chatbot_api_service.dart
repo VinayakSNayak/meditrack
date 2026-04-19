@@ -6,7 +6,7 @@ import 'package:http/http.dart' as http;
 /// Model: openai/gpt-4o-mini via https://models.github.ai
 class ChatbotApiService {
   static const String _token =
-      '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';
+      '';
 
   static const String _endpoint =
       'https://models.github.ai/inference/v1/chat/completions';
