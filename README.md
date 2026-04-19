@@ -41,17 +41,17 @@ Built using **Flutter + Firebase + AI**, it ensures secure, reliable, and intell
 
 ### 🔐 Security
 
-* Firebase Authentication
-* Encrypted storage
+* Firebase Authentication  
+- Secure cloud storage with Firestore rules 
 
 ### 🌐 Multilingual
 
 * English, Hindi, Kannada
 
-### 🤖 AI Chatbot
-
-* Context-aware assistant
-* Safe health guidance
+### 🤖 AI-Powered Assistant  
+- Provides health-related assistance  
+- Uses GPT-4o-mini via GitHub Models API  
+- Enhances user interaction 
 
 ### 📄 PDF Reports
 
@@ -66,7 +66,7 @@ Built using **Flutter + Firebase + AI**, it ensures secure, reliable, and intell
 * **Google ML Kit (OCR)**
 * **flutter_local_notifications**
 * **fl_chart**
-* **GitHub Models API (GPT-4o-mini)**
+* **AI: GitHub Models API (GPT-4o-mini)**
 
 ---
 
@@ -122,7 +122,8 @@ GITHUB_TOKEN=your_api_key_here
 
 ## 📱 Screenshots
 
-(Add images here)
+<img width="394" height="883" alt="Screenshot 2026-04-07 003203" src="https://github.com/user-attachments/assets/e264a609-69df-4ea1-aa50-39f54d3cf56b" />
+
 
 ---
 
