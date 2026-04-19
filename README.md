@@ -123,17 +123,17 @@ GITHUB_TOKEN=your_api_key_here
 ## 📱 Screenshots
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/e264a609-69df-4ea1-aa50-39f54d3cf56b" width="250"/>
+  <img src="https://github.com/user-attachments/assets/e264a609-69df-4ea1-aa50-39f54d3cf56b" width="250"/> &nbsp;&nbsp;&nbsp;
   <img src="https://github.com/user-attachments/assets/0d099e53-3272-4a10-808d-39f9ad531de5" width="250"/>
 </p>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/037e659a-f67b-4edc-b6b8-605ef97b2164" width="250"/>
+  <img src="https://github.com/user-attachments/assets/037e659a-f67b-4edc-b6b8-605ef97b2164" width="250"/> &nbsp;&nbsp;&nbsp;
   <img src="https://github.com/user-attachments/assets/5ad6fe6e-1ab2-4419-b162-6654dc244a24" width="250"/>
 </p>
 
 <p align="center">
-  <img src="https://github.com/user-attachments/assets/44b1a15d-f860-4a88-ba01-87faca00cfb5" width="250"/>
+  <img src="https://github.com/user-attachments/assets/44b1a15d-f860-4a88-ba01-87faca00cfb5" width="250"/> &nbsp;&nbsp;&nbsp;
   <img src="https://github.com/user-attachments/assets/9cb16639-53b1-495d-8a99-878c72241b52" width="250"/>
 </p>
 
